@@ -1,0 +1,191 @@
+package com.ticket.service;
+
+import com.ticket.dao.mysql.ProfileDAO;
+import com.ticket.dao.mysql.UserDAO;
+import com.ticket.exception.BusinessException;
+import com.ticket.model.ActionLog;
+import com.ticket.model.Profile;
+import com.ticket.model.SystemLog;
+import com.ticket.model.User;
+import com.ticket.dao.mongo.LogDAO;
+import com.ticket.dao.mongo.SystemLogDAO;
+import com.ticket.util.PasswordUtil;
+import com.ticket.util.MySQLDBUtil;
+import java.sql.Connection;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.util.regex.Pattern;
+
+public class UserService {
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
+    private static final Pattern PHONE_PATTERN = Pattern.compile("^1\\d{10}$");
+    private final UserDAO userDAO = new UserDAO();
+    private final ProfileDAO profileDAO = new ProfileDAO();
+    private final LogDAO logDAO = new LogDAO();
+    private final SystemLogDAO systemLogDAO = new SystemLogDAO();
+
+    public User register(String username, String password, String email, String phone) {
+        validateRegistration(username, password, email, phone);
+        if (userDAO.findByUsername(username) != null) {
+            throw new BusinessException("用户名已存在");
+        }
+        if (userDAO.findByEmail(email) != null) {
+            throw new BusinessException("邮箱已存在");
+        }
+        User user = new User();
+        user.setUsername(username.trim());
+        user.setPasswordHash(PasswordUtil.hashPassword(password));
+        user.setEmail(email.trim());
+        user.setPhone(phone.trim());
+        user.setRole("USER");
+        user.setStatus(1);
+        user.setCreatedAt(LocalDateTime.now());
+        user.setUpdatedAt(LocalDateTime.now());
+        Long userId;
+        try (Connection connection = MySQLDBUtil.getDataSource().getConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                userId = userDAO.insert(connection, user);
+                connection.commit();
+                user.setUserId(userId);
+            } catch (Exception ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (Exception ex) {
+            throw new BusinessException("注册失败", ex);
+        }
+        writeSystemLog(String.valueOf(userId), "ADMIN_OPERATION", "INFO", "用户注册成功", "USER_REGISTER");
+        return user;
+    }
+
+    public User login(String username, String password) {
+        if (username == null || username.isBlank() || password == null || password.isBlank()) {
+            throw new BusinessException("请输入用户名和密码");
+        }
+        User user = userDAO.findByUsername(username.trim());
+        if (user == null || !PasswordUtil.matches(password, user.getPasswordHash())) {
+            writeSystemLog(null, "LOGIN_FAIL", "WARN", "登录失败", "USER_LOGIN");
+            throw new BusinessException("用户名或密码错误");
+        }
+        if (user.getStatus() != 1) {
+            writeSystemLog(String.valueOf(user.getUserId()), "USER_DISABLED", "WARN", "用户已被禁用", "USER_LOGIN");
+            throw new BusinessException("用户已被禁用");
+        }
+        writeActionLog(String.valueOf(user.getUserId()), null, "LOGIN");
+        writeSystemLog(String.valueOf(user.getUserId()), "LOGIN", "INFO", "登录成功", "USER_LOGIN");
+        return user;
+    }
+
+    public void updateUser(User actor, User user) {
+        requireActiveUser(actor);
+        if (!actor.getUserId().equals(user.getUserId()) && !isAdmin(actor)) {
+            throw new BusinessException("无权修改该用户信息");
+        }
+        validateEmail(user.getEmail());
+        validatePhone(user.getPhone());
+        userDAO.updateBasicInfo(user);
+        writeActionLog(String.valueOf(actor.getUserId()), null, "UPDATE_PROFILE");
+    }
+
+    public void saveProfile(User actor, Profile profile) {
+        requireActiveUser(actor);
+        if (!actor.getUserId().equals(profile.getUserId()) && !isAdmin(actor)) {
+            throw new BusinessException("无权修改该用户档案");
+        }
+        profileDAO.upsert(profile);
+        writeActionLog(String.valueOf(actor.getUserId()), null, "UPDATE_PROFILE");
+    }
+
+    public Profile getProfile(Long userId) {
+        return profileDAO.findByUserId(userId);
+    }
+
+    public void changeUserStatus(User actor, Long userId, int status) {
+        requireAdmin(actor);
+        if (status != 0 && status != 1) {
+            throw new BusinessException("用户状态非法");
+        }
+        userDAO.updateStatus(userId, status);
+        writeSystemLog(String.valueOf(actor.getUserId()), "ADMIN_OPERATION", "INFO", "更新用户状态", "CHANGE_USER_STATUS");
+    }
+
+    public User findById(Long userId) {
+        return userDAO.findById(userId);
+    }
+
+    public java.util.List<User> listUsers(User actor) {
+        requireAdmin(actor);
+        return userDAO.findAll();
+    }
+
+    public static void requireAdmin(User actor) {
+        requireActiveUser(actor);
+        if (!"ADMIN".equals(actor.getRole())) {
+            throw new BusinessException("需要 ADMIN 权限");
+        }
+    }
+
+    public static void requireActiveUser(User actor) {
+        if (actor == null || actor.getStatus() == null || actor.getStatus() != 1) {
+            throw new BusinessException("当前用户不可用");
+        }
+    }
+
+    public static boolean isAdmin(User actor) {
+        return actor != null && "ADMIN".equals(actor.getRole());
+    }
+
+    private void validateRegistration(String username, String password, String email, String phone) {
+        if (username == null || username.isBlank() || username.length() > 50) {
+            throw new BusinessException("用户名长度不合法");
+        }
+        if (password == null || password.length() < 6 || password.length() > 64) {
+            throw new BusinessException("密码长度不合法");
+        }
+        validateEmail(email);
+        validatePhone(phone);
+    }
+
+    private void validateEmail(String email) {
+        if (email == null || email.length() > 100 || !EMAIL_PATTERN.matcher(email.trim()).matches()) {
+            throw new BusinessException("邮箱格式不正确");
+        }
+    }
+
+    private void validatePhone(String phone) {
+        if (phone == null || phone.length() > 20 || !PHONE_PATTERN.matcher(phone.trim()).matches()) {
+            throw new BusinessException("手机号格式不正确");
+        }
+    }
+
+    private void writeActionLog(String userId, String itemId, String actionType) {
+        ActionLog log = new ActionLog();
+        log.setUserId(userId);
+        log.setItemId(itemId);
+        log.setActionType(actionType);
+        log.setDurationSeconds("0");
+        ActionLog.ClientInfo clientInfo = new ActionLog.ClientInfo();
+        clientInfo.setClientType("SWING");
+        clientInfo.setIp("127.0.0.1");
+        log.setClientInfo(clientInfo);
+        log.setCreatedAt(Instant.now());
+        logDAO.insert(log);
+    }
+
+    private void writeSystemLog(String userId, String logType, String level, String message, String operation) {
+        SystemLog log = new SystemLog();
+        log.setUserId(userId);
+        log.setLogType(logType);
+        log.setLogLevel(level);
+        log.setMessage(message);
+        SystemLog.ActionDetail actionDetail = new SystemLog.ActionDetail();
+        actionDetail.setIp("127.0.0.1");
+        actionDetail.setOperation(operation);
+        log.setActionDetail(actionDetail);
+        log.setTimestamp(Instant.now());
+        systemLogDAO.insert(log);
+    }
+}
