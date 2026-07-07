@@ -20,7 +20,8 @@ ticket-management/
 ├── README.md
 ├── docs/
 │   ├── requirements.md
-│   └── database-design.md
+│   ├── database-design.md
+│   └── day02-delivery.md
 ├── src/main/java/com/ticket/
 ├── src/main/resources/
 │   ├── db.properties
@@ -33,7 +34,8 @@ ticket-management/
 
 - [需求规格说明书（含用例图）](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/requirements.md)
 - [数据库设计文档（含 MySQL E-R 图与 MongoDB 集合结构）](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/database-design.md)
-- 码云仓库：完成 Gitee 远程地址配置后上传
+- [Day02 交付记录：数据库实现、工程搭建与 DAO 基础](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day02-delivery.md)
+- 代码仓库远程：`origin` 指向 Gitee，`github` 指向 GitHub
 
 ## 环境要求
 

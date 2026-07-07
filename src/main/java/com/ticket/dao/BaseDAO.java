@@ -11,8 +11,18 @@ import java.util.List;
 import javax.sql.DataSource;
 
 public abstract class BaseDAO {
+    private final DataSource dataSource;
+
+    protected BaseDAO() {
+        this(MySQLDBUtil.getDataSource());
+    }
+
+    protected BaseDAO(DataSource dataSource) {
+        this.dataSource = dataSource;
+    }
+
     protected DataSource dataSource() {
-        return MySQLDBUtil.getDataSource();
+        return dataSource;
     }
 
     protected Connection getConnection() throws SQLException {
