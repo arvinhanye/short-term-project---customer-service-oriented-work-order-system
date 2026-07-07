@@ -22,6 +22,9 @@ database.system_logs.createIndex({ user_id: 1 });
 database.system_logs.createIndex({ log_type: 1 });
 database.system_logs.createIndex({ log_level: 1 });
 database.system_logs.createIndex({ timestamp: -1 });
+database.system_logs.createIndex({ log_type: 1, timestamp: -1 });
+database.system_logs.createIndex({ log_level: 1, timestamp: -1 });
+database.system_logs.createIndex({ user_id: 1, timestamp: -1 });
 
 const detailSeeds = [];
 for (let i = 1; i <= 20; i += 1) {

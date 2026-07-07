@@ -8,6 +8,7 @@ import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import javax.swing.JButton;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -67,9 +68,12 @@ public class AdminWorkbenchPanel extends JPanel {
 
     private void loadStats() {
         try {
-            centerArea.setText("行为日志概览：\n" + statisticsService.behaviorDashboard(currentUser));
-            rightArea.setText("系统日志统计：\n" + statisticsService.systemLogSummary(currentUser)
-                + "\n\n最近审计日志：\n" + statisticsService.auditLogs(currentUser, 10));
+            JDialog dialog = new JDialog(mainFrame, "数据统计与报表", false);
+            dialog.setLayout(new BorderLayout());
+            dialog.add(new AdminStatisticsPanel(statisticsService, currentUser), BorderLayout.CENTER);
+            dialog.setSize(1100, 720);
+            dialog.setLocationRelativeTo(this);
+            dialog.setVisible(true);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }

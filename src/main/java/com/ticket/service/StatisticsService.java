@@ -21,6 +21,9 @@ public class StatisticsService {
 
     public List<ReportDTO> monthlyReport(User actor, int year, int month) {
         UserService.requireAdmin(actor);
+        if (year < 2000 || year > 2100 || month < 1 || month > 12) {
+            throw new BusinessException("报表年月不合法");
+        }
         List<ReportDTO> report = new ArrayList<>();
         try (Connection connection = MySQLDBUtil.getDataSource().getConnection();
              CallableStatement statement = connection.prepareCall("{call sp_monthly_report(?, ?)}")) {
@@ -33,6 +36,8 @@ public class StatisticsService {
                     report.add(new ReportDTO("processing_count", resultSet.getLong("processing_count"), null));
                     report.add(new ReportDTO("completed_count", resultSet.getLong("completed_count"), null));
                     report.add(new ReportDTO("closed_count", resultSet.getLong("closed_count"), null));
+                    report.add(new ReportDTO("cancelled_count", resultSet.getLong("cancelled_count"), null));
+                    report.add(new ReportDTO("avg_amount", 0L, resultSet.getBigDecimal("avg_amount")));
                 }
             }
             return report;
@@ -124,8 +129,37 @@ public class StatisticsService {
         return systemLogDAO.findRecent(limit);
     }
 
+    public List<Document> auditLogs(User actor, String logType, String logLevel, String userId, String keyword, int limit) {
+        UserService.requireAdmin(actor);
+        return systemLogDAO.findByCondition(logType, logLevel, userId, keyword, limit);
+    }
+
     public List<Document> systemLogSummary(User actor) {
         UserService.requireAdmin(actor);
         return systemLogDAO.aggregateByLogType();
+    }
+
+    public Document systemLogDashboard(User actor) {
+        UserService.requireAdmin(actor);
+        return new Document("type_summary", systemLogDAO.aggregateByLogType())
+            .append("level_summary", systemLogDAO.aggregateByLogLevel())
+            .append("user_summary", systemLogDAO.aggregateByUser(10))
+            .append("daily_trend", systemLogDAO.aggregateDailyTrend(30))
+            .append("recent_logs", systemLogDAO.findRecent(20));
+    }
+
+    public List<Document> systemLogLevelSummary(User actor) {
+        UserService.requireAdmin(actor);
+        return systemLogDAO.aggregateByLogLevel();
+    }
+
+    public List<Document> systemLogUserSummary(User actor, int limit) {
+        UserService.requireAdmin(actor);
+        return systemLogDAO.aggregateByUser(limit);
+    }
+
+    public List<Document> systemLogDailyTrend(User actor, int days) {
+        UserService.requireAdmin(actor);
+        return systemLogDAO.aggregateDailyTrend(days);
     }
 }

@@ -10,6 +10,7 @@ BEGIN
         SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END) AS processing_count,
         SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END) AS completed_count,
         SUM(CASE WHEN status = 3 THEN 1 ELSE 0 END) AS closed_count,
+        SUM(CASE WHEN status = 4 THEN 1 ELSE 0 END) AS cancelled_count,
         COALESCE(SUM(amount), 0.00) AS total_amount,
         COALESCE(AVG(amount), 0.00) AS avg_amount
     FROM orders

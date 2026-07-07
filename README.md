@@ -9,7 +9,7 @@
 - 工程骨架：`model`、`dto`、`exception`、`dao`、`service`、`ui`
 - 用户模块基础能力：注册、登录、资料维护、用户状态控制
 - 工单模块基础能力：创建工单、查看我的工单、查看详情、回复、评价、状态流转、客服分配
-- 统计模块基础能力：MySQL 存储过程调用、MongoDB 聚合统计、系统日志查询
+- 统计报表模块：MySQL 月度报表存储过程调用、MongoDB 聚合统计、系统日志审计查询
 - Swing 基础工作台：登录页、注册页、普通用户工作台、ADMIN 工作台
 
 ## 目录结构
@@ -38,6 +38,7 @@ ticket-management/
 - [Day03 交付记录：核心业务模块与 MongoDB DAO](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day03-delivery.md)
 - [Day04 交付记录：行为日志模块与聚合统计](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day04-delivery.md)
 - [Day05 交付记录：推荐功能与跨数据库联查](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day05-delivery.md)
+- [Day06 交付记录：数据统计与报表模块](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day06-delivery.md)
 - 代码仓库远程：`origin` 指向 Gitee，`github` 指向 GitHub
 
 ## 环境要求
