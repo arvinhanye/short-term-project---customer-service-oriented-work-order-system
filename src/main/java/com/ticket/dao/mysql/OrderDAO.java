@@ -33,6 +33,19 @@ public class OrderDAO extends BaseDAO {
         return queryOne("SELECT * FROM orders WHERE item_id = ?", statement -> statement.setLong(1, itemId), this::mapOrder);
     }
 
+    public List<Order> findRecentByUser(Long userId, int limit) {
+        return query("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            statement -> {
+                statement.setLong(1, userId);
+                statement.setInt(2, normalizeLimit(limit));
+            }, this::mapOrder);
+    }
+
+    public List<Order> findRecent(int limit) {
+        return query("SELECT * FROM orders ORDER BY created_at DESC LIMIT ?",
+            statement -> statement.setInt(1, normalizeLimit(limit)), this::mapOrder);
+    }
+
     public PageResult<Order> pageByUserAndStatus(Long userId, Integer status, int page, int pageSize) {
         String countSql = "SELECT COUNT(*) AS cnt FROM orders WHERE user_id = ? AND (? IS NULL OR status = ?)";
         long total = queryOne(countSql, statement -> {
@@ -65,6 +78,36 @@ public class OrderDAO extends BaseDAO {
         return new PageResult<>(orders, total, page, pageSize);
     }
 
+    public PageResult<Order> pageAllByStatus(Integer status, int page, int pageSize) {
+        String countSql = "SELECT COUNT(*) AS cnt FROM orders WHERE (? IS NULL OR status = ?)";
+        long total = queryOne(countSql, statement -> {
+            if (status == null) {
+                statement.setNull(1, java.sql.Types.INTEGER);
+                statement.setNull(2, java.sql.Types.INTEGER);
+            } else {
+                statement.setInt(1, status);
+                statement.setInt(2, status);
+            }
+        }, rs -> rs.getLong("cnt"));
+
+        List<Order> orders = query(
+            "SELECT * FROM orders WHERE (? IS NULL OR status = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?",
+            statement -> {
+                if (status == null) {
+                    statement.setNull(1, java.sql.Types.INTEGER);
+                    statement.setNull(2, java.sql.Types.INTEGER);
+                } else {
+                    statement.setInt(1, status);
+                    statement.setInt(2, status);
+                }
+                statement.setInt(3, pageSize);
+                statement.setInt(4, Math.max(0, (page - 1) * pageSize));
+            },
+            this::mapOrder
+        );
+        return new PageResult<>(orders, total, page, pageSize);
+    }
+
     public void updateStatus(Connection connection, Long orderId, int status) throws Exception {
         try (PreparedStatement statement = connection.prepareStatement("UPDATE orders SET status = ? WHERE order_id = ?")) {
             statement.setInt(1, status);
@@ -75,6 +118,10 @@ public class OrderDAO extends BaseDAO {
 
     public Order findById(Long orderId) {
         return queryOne("SELECT * FROM orders WHERE order_id = ?", statement -> statement.setLong(1, orderId), this::mapOrder);
+    }
+
+    private int normalizeLimit(int limit) {
+        return Math.max(1, Math.min(limit, 100));
     }
 
     private Order mapOrder(java.sql.ResultSet resultSet) throws java.sql.SQLException {

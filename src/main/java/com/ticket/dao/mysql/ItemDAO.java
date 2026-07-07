@@ -33,6 +33,19 @@ public class ItemDAO extends BaseDAO {
         return queryOne("SELECT * FROM items WHERE item_id = ?", statement -> statement.setLong(1, itemId), this::mapItem);
     }
 
+    public List<Item> findRecent(int limit) {
+        return query("SELECT * FROM items ORDER BY created_at DESC LIMIT ?",
+            statement -> statement.setInt(1, normalizeLimit(limit)), this::mapItem);
+    }
+
+    public List<Item> findRecentByCategory(Long categoryId, int limit) {
+        return query("SELECT * FROM items WHERE category_id = ? ORDER BY created_at DESC LIMIT ?",
+            statement -> {
+                statement.setLong(1, categoryId);
+                statement.setInt(2, normalizeLimit(limit));
+            }, this::mapItem);
+    }
+
     public void updateTitle(Long itemId, String title, Long categoryId) {
         update("UPDATE items SET title = ?, category_id = ? WHERE item_id = ?",
             statement -> {
@@ -56,6 +69,10 @@ public class ItemDAO extends BaseDAO {
             this::mapItem
         );
         return new PageResult<>(items, total, page, pageSize);
+    }
+
+    private int normalizeLimit(int limit) {
+        return Math.max(1, Math.min(limit, 100));
     }
 
     private Item mapItem(java.sql.ResultSet resultSet) throws java.sql.SQLException {

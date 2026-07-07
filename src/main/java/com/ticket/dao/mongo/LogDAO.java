@@ -6,6 +6,7 @@ import com.ticket.dao.MongoBaseDAO;
 import com.ticket.model.ActionLog;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import org.bson.Document;
@@ -62,7 +63,7 @@ public class LogDAO extends MongoBaseDAO {
 
     public List<Document> aggregateHotItems() {
         return collection("action_logs").aggregate(List.of(
-            new Document("$match", new Document("item_id", new Document("$nin", List.of(null, "")))),
+            new Document("$match", new Document("item_id", new Document("$nin", Arrays.asList(null, "")))),
             new Document("$group", new Document("_id", "$item_id")
                 .append("action_count", new Document("$sum", 1))
                 .append("view_count", new Document("$sum", new Document("$cond", List.of(new Document("$eq", List.of("$action_type", "VIEW")), 1, 0))))

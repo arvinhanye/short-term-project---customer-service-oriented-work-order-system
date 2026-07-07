@@ -106,9 +106,9 @@ public class UserWorkbenchPanel extends JPanel {
         });
 
         recommendButton.addActionListener(event -> {
-            var categories = recommendService.recommendCategories(currentUser);
-            JOptionPane.showMessageDialog(this, categories.isEmpty() ? "暂无推荐分类" :
-                "推荐分类：" + categories.stream().map(category -> category.getName()).toList());
+            var recommendations = recommendService.recommendTickets(currentUser, 5);
+            JOptionPane.showMessageDialog(this, recommendations.isEmpty() ? "暂无推荐" :
+                "推荐工单：\n" + recommendations);
         });
         return panel;
     }
