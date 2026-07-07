@@ -67,8 +67,8 @@ public class BusinessService {
                 orderDAO.insert(connection, order);
                 ItemDetail detail = buildDetail(itemId, actor.getUserId(), description, priority);
                 detailDAO.upsert(detail);
-                writeActionLog(String.valueOf(actor.getUserId()), String.valueOf(itemId), "CREATE_ITEM");
                 connection.commit();
+                writeActionLog(String.valueOf(actor.getUserId()), String.valueOf(itemId), "CREATE_ITEM");
                 return itemId;
             } catch (Exception ex) {
                 connection.rollback();
@@ -143,9 +143,15 @@ public class BusinessService {
         validateStatusTransition(order.getStatus(), newStatus);
         try (Connection connection = MySQLDBUtil.getDataSource().getConnection()) {
             connection.setAutoCommit(false);
-            orderDAO.updateStatus(connection, orderId, newStatus);
-            connection.commit();
-            connection.setAutoCommit(true);
+            try {
+                orderDAO.updateStatus(connection, orderId, newStatus);
+                connection.commit();
+            } catch (Exception ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
         } catch (Exception ex) {
             throw new BusinessException("更新工单状态失败", ex);
         }

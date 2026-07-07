@@ -53,15 +53,14 @@ public abstract class BaseDAO {
     }
 
     protected int update(String sql, SqlConsumer<PreparedStatement> binder) {
-        try (Connection connection = getConnection();
-             PreparedStatement statement = connection.prepareStatement(sql)) {
-            if (binder != null) {
-                binder.accept(statement);
+        return executeTransactionCallback(connection -> {
+            try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                if (binder != null) {
+                    binder.accept(statement);
+                }
+                return statement.executeUpdate();
             }
-            return statement.executeUpdate();
-        } catch (SQLException ex) {
-            throw new DBException("MySQL update failed", ex);
-        }
+        });
     }
 
     protected <T> T executeTransactionCallback(TransactionCallback<T> callback) {
