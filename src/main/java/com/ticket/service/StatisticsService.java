@@ -51,9 +51,72 @@ public class StatisticsService {
         return logDAO.aggregateUserActions();
     }
 
+    public List<Document> actionTypeSummary(User actor) {
+        UserService.requireAdmin(actor);
+        return logDAO.aggregateActionTypeSummary();
+    }
+
+    public List<Document> dailyActionTrend(User actor, int days) {
+        UserService.requireAdmin(actor);
+        return logDAO.aggregateDailyActions(days);
+    }
+
+    public List<Document> clientUsage(User actor) {
+        UserService.requireAdmin(actor);
+        return logDAO.aggregateClientUsage();
+    }
+
+    public List<Document> recentActionLogs(User actor, int limit) {
+        UserService.requireAdmin(actor);
+        return logDAO.findRecent(limit);
+    }
+
+    public List<Document> recentActionLogsByUser(User actor, Long userId, int limit) {
+        UserService.requireAdmin(actor);
+        return logDAO.findRecentByUser(String.valueOf(userId), limit);
+    }
+
+    public List<Document> actionLogsByItem(User actor, Long itemId, int limit) {
+        UserService.requireAdmin(actor);
+        return logDAO.findByItemId(String.valueOf(itemId), limit);
+    }
+
     public List<Document> ratingStats(User actor) {
         UserService.requireAdmin(actor);
         return commentDAO.aggregateAverageRatingByItem();
+    }
+
+    public List<Document> commentTagSummary(User actor) {
+        UserService.requireAdmin(actor);
+        return commentDAO.aggregateTagSummary();
+    }
+
+    public List<Document> ratingDistribution(User actor) {
+        UserService.requireAdmin(actor);
+        return commentDAO.aggregateRatingDistribution();
+    }
+
+    public List<Document> commentTrend(User actor, int days) {
+        UserService.requireAdmin(actor);
+        return commentDAO.aggregateCommentTrend(days);
+    }
+
+    public List<Document> itemCommentStats(User actor) {
+        UserService.requireAdmin(actor);
+        return commentDAO.aggregateItemCommentStats();
+    }
+
+    public Document behaviorDashboard(User actor) {
+        UserService.requireAdmin(actor);
+        return new Document("action_type_summary", logDAO.aggregateActionTypeSummary())
+            .append("daily_action_trend", logDAO.aggregateDailyActions(30))
+            .append("hot_items", logDAO.aggregateHotItems())
+            .append("user_actions", logDAO.aggregateUserActions())
+            .append("client_usage", logDAO.aggregateClientUsage())
+            .append("recent_actions", logDAO.findRecent(20))
+            .append("comment_tag_summary", commentDAO.aggregateTagSummary())
+            .append("rating_distribution", commentDAO.aggregateRatingDistribution())
+            .append("item_comment_stats", commentDAO.aggregateItemCommentStats());
     }
 
     public List<Document> auditLogs(User actor, int limit) {

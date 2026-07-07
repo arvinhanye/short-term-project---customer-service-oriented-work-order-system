@@ -114,7 +114,7 @@ erDiagram
 | item_id | BIGINT | PK, AUTO_INCREMENT | 工单编号 |
 | title | VARCHAR(200) | NOT NULL | 工单标题 |
 | category_id | BIGINT | FK | 分类编号 |
-| status | TINYINT | NOT NULL, DEFAULT 1 | 主记录状态 |
+| status | TINYINT | NOT NULL, DEFAULT 1 | 工单业务状态，跟随 `orders.status` |
 | created_at | DATETIME | NOT NULL | 创建时间 |
 | updated_at | DATETIME | NOT NULL | 更新时间 |
 
@@ -139,7 +139,7 @@ erDiagram
 | v_business_summary | 联合工单、分类、提交人和处理状态，便于业务列表展示 |
 | sp_monthly_report | 按年月统计工单总量、状态数量、总金额和平均金额 |
 | sp_batch_update_order_status | 按时间批量更新指定状态的工单 |
-| trg_order_status_sync | 工单状态变更后同步更新工单主记录更新时间 |
+| trg_order_status_sync | 工单状态变更后同步更新工单主记录状态和更新时间 |
 | trg_item_update_time | 工单主记录更新前自动刷新 `updated_at` |
 
 ## 5. MongoDB 集合设计
@@ -194,6 +194,9 @@ MongoDB 数据库名：`ticket_management_logs`。
 | `{ item_id: 1, created_at: 1 }` | 按工单时间线读取评论 |
 | `{ user_id: 1 }` | 查询某用户评论 |
 | `{ tags: 1 }` | 区分客户回复、客服回复、内部备注和评价 |
+| `{ user_id: 1, created_at: -1 }` | 查询某用户最近评论 |
+| `{ tags: 1, created_at: -1 }` | 按标签统计和读取最近评论 |
+| `{ rating: 1 }` | 评分分布聚合 |
 
 ### 5.3 action_logs
 
@@ -221,6 +224,10 @@ MongoDB 数据库名：`ticket_management_logs`。
 | `{ item_id: 1 }` | 按工单统计热度 |
 | `{ action_type: 1 }` | 按行为类型聚合 |
 | `{ created_at: 1 }` | 按时间范围筛选 |
+| `{ user_id: 1, created_at: -1 }` | 查询用户最近行为 |
+| `{ item_id: 1, created_at: -1 }` | 查询工单行为时间线 |
+| `{ action_type: 1, created_at: -1 }` | 行为类型趋势统计 |
+| `{ "client_info.client_type": 1 }` | 客户端来源统计 |
 
 ### 5.4 system_logs
 

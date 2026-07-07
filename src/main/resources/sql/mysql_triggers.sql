@@ -8,7 +8,8 @@ FOR EACH ROW
 BEGIN
     IF OLD.status <> NEW.status THEN
         UPDATE items
-        SET updated_at = CURRENT_TIMESTAMP
+        SET status = NEW.status,
+            updated_at = CURRENT_TIMESTAMP
         WHERE item_id = NEW.item_id;
     END IF;
 END $$

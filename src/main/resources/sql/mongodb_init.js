@@ -4,10 +4,17 @@ database.action_logs.createIndex({ user_id: 1 });
 database.action_logs.createIndex({ item_id: 1 });
 database.action_logs.createIndex({ action_type: 1 });
 database.action_logs.createIndex({ created_at: 1 });
+database.action_logs.createIndex({ user_id: 1, created_at: -1 });
+database.action_logs.createIndex({ item_id: 1, created_at: -1 });
+database.action_logs.createIndex({ action_type: 1, created_at: -1 });
+database.action_logs.createIndex({ "client_info.client_type": 1 });
 
 database.comments.createIndex({ item_id: 1, created_at: 1 });
 database.comments.createIndex({ user_id: 1 });
 database.comments.createIndex({ tags: 1 });
+database.comments.createIndex({ user_id: 1, created_at: -1 });
+database.comments.createIndex({ tags: 1, created_at: -1 });
+database.comments.createIndex({ rating: 1 });
 
 database.item_details.createIndex({ item_id: 1 }, { unique: true });
 

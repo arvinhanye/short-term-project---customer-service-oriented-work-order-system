@@ -43,6 +43,7 @@ public class AdminWorkbenchPanel extends JPanel {
         JTable leftTable = new JTable(leftTableModel);
         leftTableModel.addRow(new Object[]{"全部工单", "三栏式客服工作台入口"});
         leftTableModel.addRow(new Object[]{"分类管理", "维护一级/二级分类"});
+        leftTableModel.addRow(new Object[]{"行为日志", "查看行为聚合、评论统计和评分分布"});
         leftTableModel.addRow(new Object[]{"系统日志", "查看审计与异常日志"});
 
         JSplitPane rightSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, new JScrollPane(centerArea), new JScrollPane(rightArea));
@@ -66,9 +67,9 @@ public class AdminWorkbenchPanel extends JPanel {
 
     private void loadStats() {
         try {
-            var stats = statisticsService.systemLogSummary(currentUser);
-            centerArea.setText("系统日志统计：\n" + stats);
-            rightArea.setText("热门工单：\n" + statisticsService.hotItems(currentUser));
+            centerArea.setText("行为日志概览：\n" + statisticsService.behaviorDashboard(currentUser));
+            rightArea.setText("系统日志统计：\n" + statisticsService.systemLogSummary(currentUser)
+                + "\n\n最近审计日志：\n" + statisticsService.auditLogs(currentUser, 10));
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }

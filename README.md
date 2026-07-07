@@ -36,6 +36,7 @@ ticket-management/
 - [数据库设计文档（含 MySQL E-R 图与 MongoDB 集合结构）](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/database-design.md)
 - [Day02 交付记录：数据库实现、工程搭建与 DAO 基础](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day02-delivery.md)
 - [Day03 交付记录：核心业务模块与 MongoDB DAO](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day03-delivery.md)
+- [Day04 交付记录：行为日志模块与聚合统计](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day04-delivery.md)
 - 代码仓库远程：`origin` 指向 Gitee，`github` 指向 GitHub
 
 ## 环境要求

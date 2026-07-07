@@ -48,7 +48,7 @@ public class BusinessService {
         Item item = new Item();
         item.setTitle(title.trim());
         item.setCategoryId(categoryId);
-        item.setStatus(1);
+        item.setStatus(0);
         item.setCreatedAt(LocalDateTime.now());
         item.setUpdatedAt(LocalDateTime.now());
 
