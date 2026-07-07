@@ -15,16 +15,16 @@ ALTER TABLE orders AUTO_INCREMENT = 3001;
 ALTER TABLE profiles AUTO_INCREMENT = 5001;
 
 INSERT INTO users (user_id, username, password_hash, email, phone, role, status, created_at, updated_at) VALUES
-    (10001, 'admin01', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'admin01@ticket.local', '13800000001', 'ADMIN', 1, '2026-01-01 09:00:00', '2026-01-01 09:00:00'),
-    (10002, 'admin02', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'admin02@ticket.local', '13800000002', 'ADMIN', 1, '2026-01-02 09:00:00', '2026-01-02 09:00:00'),
-    (10003, 'admin03', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'admin03@ticket.local', '13800000003', 'ADMIN', 1, '2026-01-03 09:00:00', '2026-01-03 09:00:00'),
-    (10004, 'user01', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'user01@ticket.local', '13900000001', 'USER', 1, '2026-01-04 09:00:00', '2026-01-04 09:00:00'),
-    (10005, 'user02', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'user02@ticket.local', '13900000002', 'USER', 1, '2026-01-05 09:00:00', '2026-01-05 09:00:00'),
-    (10006, 'user03', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'user03@ticket.local', '13900000003', 'USER', 1, '2026-01-06 09:00:00', '2026-01-06 09:00:00'),
-    (10007, 'user04', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'user04@ticket.local', '13900000004', 'USER', 1, '2026-01-07 09:00:00', '2026-01-07 09:00:00'),
-    (10008, 'user05', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'user05@ticket.local', '13900000005', 'USER', 1, '2026-01-08 09:00:00', '2026-01-08 09:00:00'),
-    (10009, 'user06', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'user06@ticket.local', '13900000006', 'USER', 0, '2026-01-09 09:00:00', '2026-01-09 09:00:00'),
-    (10010, 'user07', '$2y$10$LVhEldHsnfOnmU.qrQBfPOj8XUJakJ/z84NlFAjPpyACovNL4gpeO', 'user07@ticket.local', '13900000007', 'USER', 1, '2026-01-10 09:00:00', '2026-01-10 09:00:00');
+    (10001, 'admin01', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin01@ticket.local', '13800000001', 'ADMIN', 1, '2026-01-01 09:00:00', '2026-01-01 09:00:00'),
+    (10002, 'admin02', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin02@ticket.local', '13800000002', 'ADMIN', 1, '2026-01-02 09:00:00', '2026-01-02 09:00:00'),
+    (10003, 'admin03', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin03@ticket.local', '13800000003', 'ADMIN', 1, '2026-01-03 09:00:00', '2026-01-03 09:00:00'),
+    (10004, 'user01', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user01@ticket.local', '13900000001', 'USER', 1, '2026-01-04 09:00:00', '2026-01-04 09:00:00'),
+    (10005, 'user02', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user02@ticket.local', '13900000002', 'USER', 1, '2026-01-05 09:00:00', '2026-01-05 09:00:00'),
+    (10006, 'user03', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user03@ticket.local', '13900000003', 'USER', 1, '2026-01-06 09:00:00', '2026-01-06 09:00:00'),
+    (10007, 'user04', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user04@ticket.local', '13900000004', 'USER', 1, '2026-01-07 09:00:00', '2026-01-07 09:00:00'),
+    (10008, 'user05', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user05@ticket.local', '13900000005', 'USER', 1, '2026-01-08 09:00:00', '2026-01-08 09:00:00'),
+    (10009, 'user06', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user06@ticket.local', '13900000006', 'USER', 0, '2026-01-09 09:00:00', '2026-01-09 09:00:00'),
+    (10010, 'user07', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user07@ticket.local', '13900000007', 'USER', 1, '2026-01-10 09:00:00', '2026-01-10 09:00:00');
 
 INSERT INTO categories (category_id, name, parent_id) VALUES
     (4001, '账户问题', NULL),

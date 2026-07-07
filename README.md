@@ -46,6 +46,9 @@ ticket-management/
 - [Day07 安全检查清单](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-security-checklist.md)
 - [Day08 交付记录：单元测试补充、压力测试与代码重构](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day08-delivery.md)
 - [Day08 压力测试报告](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day08-stress-test-report.md)
+- [技术设计文档](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/technical-design.md)
+- [用户手册](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/user-manual.md)
+- [Day09 交付记录：技术设计文档与用户手册](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day09-delivery.md)
 - 代码仓库远程：`origin` 指向 Gitee，`github` 指向 GitHub
 
 ## 环境要求
@@ -89,6 +92,8 @@ java -jar target/ticket-management.jar
 ```
 
 主类为 `com.ticket.Main`。
+
+初始化数据中的示例账号默认密码均为 `Ticket@123`。可使用 `admin01` 登录管理员工作台，或使用 `user01` 登录普通用户工作台；`user06` 为禁用账号，可用于验证账号状态控制。
 
 Day08 压力测试需显式开启：
 
