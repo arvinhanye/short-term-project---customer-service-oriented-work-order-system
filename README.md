@@ -11,6 +11,7 @@
 - 工单模块基础能力：创建工单、查看我的工单、查看详情、回复、评价、状态流转、客服分配
 - 统计报表模块：MySQL 月度报表存储过程调用、MongoDB 聚合统计、系统日志审计查询
 - 稳定版加固：分页 SQL 优化、性能索引、批处理状态流转、密码强度校验、系统自检
+- 测试与重构：JUnit5 单元测试、事务回滚测试、行为日志压力测试入口、公共日志服务重构
 - Swing 基础工作台：登录页、注册页、普通用户工作台、ADMIN 工作台
 
 ## 目录结构
@@ -43,6 +44,8 @@ ticket-management/
 - [Day07 交付记录：性能优化、安全加固与系统集成](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-delivery.md)
 - [Day07 性能优化报告](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-performance-report.md)
 - [Day07 安全检查清单](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-security-checklist.md)
+- [Day08 交付记录：单元测试补充、压力测试与代码重构](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day08-delivery.md)
+- [Day08 压力测试报告](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day08-stress-test-report.md)
 - 代码仓库远程：`origin` 指向 Gitee，`github` 指向 GitHub
 
 ## 环境要求
@@ -86,3 +89,9 @@ java -jar target/ticket-management.jar
 ```
 
 主类为 `com.ticket.Main`。
+
+Day08 压力测试需显式开启：
+
+```bash
+mvn -Dstress=true -Dtest=com.ticket.performance.ActionLogStressTest test
+```

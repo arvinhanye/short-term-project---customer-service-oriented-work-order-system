@@ -3,16 +3,11 @@ package com.ticket.service;
 import com.ticket.dao.mysql.ProfileDAO;
 import com.ticket.dao.mysql.UserDAO;
 import com.ticket.exception.BusinessException;
-import com.ticket.model.ActionLog;
 import com.ticket.model.Profile;
-import com.ticket.model.SystemLog;
 import com.ticket.model.User;
-import com.ticket.dao.mongo.LogDAO;
-import com.ticket.dao.mongo.SystemLogDAO;
 import com.ticket.util.PasswordUtil;
 import com.ticket.util.MySQLDBUtil;
 import java.sql.Connection;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.regex.Pattern;
 
@@ -21,8 +16,8 @@ public class UserService {
     private static final Pattern PHONE_PATTERN = Pattern.compile("^1\\d{10}$");
     private final UserDAO userDAO = new UserDAO();
     private final ProfileDAO profileDAO = new ProfileDAO();
-    private final LogDAO logDAO = new LogDAO();
-    private final SystemLogDAO systemLogDAO = new SystemLogDAO();
+    private final ActionLogService actionLogService = new ActionLogService();
+    private final AuditLogService auditLogService = new AuditLogService();
 
     public User register(String username, String password, String email, String phone) {
         validateRegistration(username, password, email, phone);
@@ -57,7 +52,7 @@ public class UserService {
         } catch (Exception ex) {
             throw new BusinessException("注册失败", ex);
         }
-        writeSystemLog(String.valueOf(userId), "ADMIN_OPERATION", "INFO", "用户注册成功", "USER_REGISTER");
+        auditLogService.write(String.valueOf(userId), "ADMIN_OPERATION", "INFO", "用户注册成功", "USER_REGISTER");
         return user;
     }
 
@@ -67,15 +62,15 @@ public class UserService {
         }
         User user = userDAO.findByUsername(username.trim());
         if (user == null || !PasswordUtil.matches(password, user.getPasswordHash())) {
-            writeSystemLog(null, "LOGIN_FAIL", "WARN", "登录失败", "USER_LOGIN");
+            auditLogService.write(null, "LOGIN_FAIL", "WARN", "登录失败", "USER_LOGIN");
             throw new BusinessException("用户名或密码错误");
         }
         if (user.getStatus() != 1) {
-            writeSystemLog(String.valueOf(user.getUserId()), "USER_DISABLED", "WARN", "用户已被禁用", "USER_LOGIN");
+            auditLogService.write(String.valueOf(user.getUserId()), "USER_DISABLED", "WARN", "用户已被禁用", "USER_LOGIN");
             throw new BusinessException("用户已被禁用");
         }
-        writeActionLog(String.valueOf(user.getUserId()), null, "LOGIN");
-        writeSystemLog(String.valueOf(user.getUserId()), "LOGIN", "INFO", "登录成功", "USER_LOGIN");
+        actionLogService.write(String.valueOf(user.getUserId()), null, "LOGIN");
+        auditLogService.write(String.valueOf(user.getUserId()), "LOGIN", "INFO", "登录成功", "USER_LOGIN");
         return user;
     }
 
@@ -87,7 +82,7 @@ public class UserService {
         validateEmail(user.getEmail());
         validatePhone(user.getPhone());
         userDAO.updateBasicInfo(user);
-        writeActionLog(String.valueOf(actor.getUserId()), null, "UPDATE_PROFILE");
+        actionLogService.write(String.valueOf(actor.getUserId()), null, "UPDATE_PROFILE");
     }
 
     public void saveProfile(User actor, Profile profile) {
@@ -97,7 +92,7 @@ public class UserService {
         }
         validateProfile(profile);
         profileDAO.upsert(profile);
-        writeActionLog(String.valueOf(actor.getUserId()), null, "UPDATE_PROFILE");
+        actionLogService.write(String.valueOf(actor.getUserId()), null, "UPDATE_PROFILE");
     }
 
     public Profile getProfile(Long userId) {
@@ -110,7 +105,7 @@ public class UserService {
             throw new BusinessException("用户状态非法");
         }
         userDAO.updateStatus(userId, status);
-        writeSystemLog(String.valueOf(actor.getUserId()), "ADMIN_OPERATION", "INFO", "更新用户状态", "CHANGE_USER_STATUS");
+        auditLogService.write(String.valueOf(actor.getUserId()), "ADMIN_OPERATION", "INFO", "更新用户状态", "CHANGE_USER_STATUS");
     }
 
     public User findById(Long userId) {
@@ -182,31 +177,4 @@ public class UserService {
         return value != null && value.length() > maxLength;
     }
 
-    private void writeActionLog(String userId, String itemId, String actionType) {
-        ActionLog log = new ActionLog();
-        log.setUserId(userId);
-        log.setItemId(itemId);
-        log.setActionType(actionType);
-        log.setDurationSeconds("0");
-        ActionLog.ClientInfo clientInfo = new ActionLog.ClientInfo();
-        clientInfo.setClientType("SWING");
-        clientInfo.setIp("127.0.0.1");
-        log.setClientInfo(clientInfo);
-        log.setCreatedAt(Instant.now());
-        logDAO.insert(log);
-    }
-
-    private void writeSystemLog(String userId, String logType, String level, String message, String operation) {
-        SystemLog log = new SystemLog();
-        log.setUserId(userId);
-        log.setLogType(logType);
-        log.setLogLevel(level);
-        log.setMessage(message);
-        SystemLog.ActionDetail actionDetail = new SystemLog.ActionDetail();
-        actionDetail.setIp("127.0.0.1");
-        actionDetail.setOperation(operation);
-        log.setActionDetail(actionDetail);
-        log.setTimestamp(Instant.now());
-        systemLogDAO.insert(log);
-    }
 }

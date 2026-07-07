@@ -2,8 +2,6 @@ package com.ticket.service;
 
 import com.ticket.dao.mongo.CommentDAO;
 import com.ticket.dao.mongo.DetailDAO;
-import com.ticket.dao.mongo.LogDAO;
-import com.ticket.dao.mongo.SystemLogDAO;
 import com.ticket.dao.mysql.CategoryDAO;
 import com.ticket.dao.mysql.ItemDAO;
 import com.ticket.dao.mysql.OrderDAO;
@@ -13,12 +11,10 @@ import com.ticket.dto.ItemDetailDTO;
 import com.ticket.dto.PageResult;
 import com.ticket.exception.BusinessException;
 import com.ticket.exception.DBException;
-import com.ticket.model.ActionLog;
 import com.ticket.model.Comment;
 import com.ticket.model.Item;
 import com.ticket.model.ItemDetail;
 import com.ticket.model.Order;
-import com.ticket.model.SystemLog;
 import com.ticket.model.User;
 import com.ticket.util.MySQLDBUtil;
 import java.math.BigDecimal;
@@ -35,8 +31,8 @@ public class BusinessService {
     private final ProfileDAO profileDAO = new ProfileDAO();
     private final DetailDAO detailDAO = new DetailDAO();
     private final CommentDAO commentDAO = new CommentDAO();
-    private final LogDAO logDAO = new LogDAO();
-    private final SystemLogDAO systemLogDAO = new SystemLogDAO();
+    private final ActionLogService actionLogService = new ActionLogService();
+    private final AuditLogService auditLogService = new AuditLogService();
 
     public long createTicket(User actor, String title, Long categoryId, BigDecimal amount, String description, String priority) {
         UserService.requireActiveUser(actor);
@@ -79,14 +75,14 @@ public class BusinessService {
                 ItemDetail detail = buildDetail(itemId, actor.getUserId(), description, normalizedPriority);
                 detailDAO.upsert(detail);
                 connection.commit();
-                writeActionLog(String.valueOf(actor.getUserId()), String.valueOf(itemId), "CREATE_ITEM");
+                actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "CREATE_ITEM");
                 return itemId;
             } catch (Exception ex) {
                 connection.rollback();
                 if (itemId != null) {
                     detailDAO.deleteByItemId(String.valueOf(itemId));
                 }
-                writeSystemLog(String.valueOf(actor.getUserId()), "CROSS_DB_FAIL", "ERROR", "创建工单失败", "CREATE_ITEM");
+                auditLogService.write(String.valueOf(actor.getUserId()), "CROSS_DB_FAIL", "ERROR", "创建工单失败", "CREATE_ITEM");
                 throw ex instanceof BusinessException ? (BusinessException) ex : new BusinessException("创建工单失败", ex);
             } finally {
                 connection.setAutoCommit(true);
@@ -98,7 +94,7 @@ public class BusinessService {
 
     public PageResult<Order> pageMyOrders(User actor, Integer status, int page, int pageSize) {
         UserService.requireActiveUser(actor);
-        writeActionLog(String.valueOf(actor.getUserId()), null, "SEARCH");
+        actionLogService.write(String.valueOf(actor.getUserId()), null, "SEARCH");
         return orderDAO.pageByUserAndStatus(actor.getUserId(), status, page, pageSize);
     }
 
@@ -119,7 +115,7 @@ public class BusinessService {
         dto.setProfile(profileDAO.findByUserId(order.getUserId()));
         dto.setItemDetail(detailDAO.findByItemId(String.valueOf(itemId)));
         dto.setComments(commentDAO.findByItemId(String.valueOf(itemId), UserService.isAdmin(actor)));
-        writeActionLog(String.valueOf(actor.getUserId()), String.valueOf(itemId), "VIEW");
+        actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "VIEW");
         return dto;
     }
 
@@ -142,7 +138,7 @@ public class BusinessService {
             throw new BusinessException("评分必须在 1 到 5 之间");
         }
         addComment(actor, itemId, content, "CUSTOMER_RATING", String.valueOf(rating), false);
-        writeActionLog(String.valueOf(actor.getUserId()), String.valueOf(itemId), "RATE");
+        actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "RATE");
     }
 
     public void changeOrderStatus(User actor, Long orderId, int newStatus) {
@@ -166,8 +162,8 @@ public class BusinessService {
         } catch (Exception ex) {
             throw new BusinessException("更新工单状态失败", ex);
         }
-        writeActionLog(String.valueOf(actor.getUserId()), String.valueOf(order.getItemId()), "CHANGE_STATUS");
-        writeSystemLog(String.valueOf(actor.getUserId()), "STATUS_CHANGE", "INFO", "工单状态已更新", "CHANGE_STATUS");
+        actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(order.getItemId()), "CHANGE_STATUS");
+        auditLogService.write(String.valueOf(actor.getUserId()), "STATUS_CHANGE", "INFO", "工单状态已更新", "CHANGE_STATUS");
     }
 
     public void assignAdmin(User actor, Long itemId, Long adminId) {
@@ -183,7 +179,7 @@ public class BusinessService {
         detail.getMetadata().setAssignedAdminId(String.valueOf(adminId));
         detail.getMetadata().setLastProcessedAt(Instant.now());
         detailDAO.upsert(detail);
-        writeActionLog(String.valueOf(actor.getUserId()), String.valueOf(itemId), "ASSIGN");
+        actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "ASSIGN");
     }
 
     public static void validateStatusTransition(int oldStatus, int newStatus) {
@@ -218,7 +214,7 @@ public class BusinessService {
         comment.setTags(List.of(tag));
         comment.setCreatedAt(Instant.now());
         commentDAO.insert(comment);
-        writeActionLog(String.valueOf(actor.getUserId()), String.valueOf(itemId), "ADD_COMMENT");
+        actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "ADD_COMMENT");
     }
 
     private ItemDetail buildDetail(Long itemId, Long userId, String description, String priority) {
@@ -245,31 +241,4 @@ public class BusinessService {
         return normalized;
     }
 
-    private void writeActionLog(String userId, String itemId, String actionType) {
-        ActionLog log = new ActionLog();
-        log.setUserId(userId);
-        log.setItemId(itemId);
-        log.setActionType(actionType);
-        log.setDurationSeconds("0");
-        ActionLog.ClientInfo clientInfo = new ActionLog.ClientInfo();
-        clientInfo.setClientType("SWING");
-        clientInfo.setIp("127.0.0.1");
-        log.setClientInfo(clientInfo);
-        log.setCreatedAt(Instant.now());
-        logDAO.insert(log);
-    }
-
-    private void writeSystemLog(String userId, String logType, String level, String message, String operation) {
-        SystemLog log = new SystemLog();
-        log.setUserId(userId);
-        log.setLogType(logType);
-        log.setLogLevel(level);
-        log.setMessage(message);
-        SystemLog.ActionDetail actionDetail = new SystemLog.ActionDetail();
-        actionDetail.setIp("127.0.0.1");
-        actionDetail.setOperation(operation);
-        log.setActionDetail(actionDetail);
-        log.setTimestamp(Instant.now());
-        systemLogDAO.insert(log);
-    }
 }
