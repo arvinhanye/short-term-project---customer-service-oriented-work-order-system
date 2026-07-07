@@ -118,6 +118,13 @@ erDiagram
 | created_at | DATETIME | NOT NULL | 创建时间 |
 | updated_at | DATETIME | NOT NULL | 更新时间 |
 
+常用索引：
+
+| 索引 | 说明 |
+| --- | --- |
+| `idx_items_category_created_at(category_id, created_at)` | 按分类读取最近工单 |
+| `ft_items_title(title)` | 支持标题全文检索优化 |
+
 ### 3.5 orders
 
 工单处理记录表，保存提交人、金额和业务状态。代码中沿用 `Order` 命名，业务语义为工单流转记录。
@@ -130,6 +137,15 @@ erDiagram
 | amount | DECIMAL(10,2) | NOT NULL | 涉及金额 |
 | status | TINYINT | NOT NULL, DEFAULT 0 | 0 待处理，1 处理中，2 已完成，3 已关闭，4 已取消 |
 | created_at | DATETIME | NOT NULL | 提交时间 |
+
+常用索引：
+
+| 索引 | 说明 |
+| --- | --- |
+| `uk_orders_item_id(item_id)` | 保证一个工单主记录只有一条处理记录 |
+| `idx_orders_user_created_at(user_id, created_at)` | 普通用户“我的工单”分页 |
+| `idx_orders_user_status_created_at(user_id, status, created_at)` | 普通用户按状态筛选分页 |
+| `idx_orders_status_created_at(status, created_at)` | 管理员按状态筛选分页 |
 
 ## 4. MySQL 视图、过程与触发器
 
@@ -255,6 +271,9 @@ MongoDB 数据库名：`ticket_management_logs`。
 | `{ log_type: 1 }` | 按日志类型聚合 |
 | `{ log_level: 1 }` | 按日志等级筛选 |
 | `{ timestamp: -1 }` | 最近日志倒序查询 |
+| `{ log_type: 1, timestamp: -1 }` | 按类型筛选最近系统日志 |
+| `{ log_level: 1, timestamp: -1 }` | 按级别筛选最近系统日志 |
+| `{ user_id: 1, timestamp: -1 }` | 按用户筛选最近系统日志 |
 
 ## 6. 跨库关系
 
@@ -276,3 +295,5 @@ MongoDB 数据库名：`ticket_management_logs`。
 4. `src/main/resources/sql/mysql_triggers.sql`
 5. `src/main/resources/sql/mysql_init_data.sql`
 6. `src/main/resources/sql/mongodb_init.js`
+
+已初始化过的数据库可额外执行 `src/main/resources/sql/mysql_day07_optimization.sql`，补充 Day07 性能优化索引并查看关键查询的 `EXPLAIN` 结果。

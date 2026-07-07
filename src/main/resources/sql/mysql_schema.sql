@@ -53,7 +53,9 @@ CREATE TABLE items (
         FOREIGN KEY (category_id) REFERENCES categories(category_id),
     INDEX idx_items_category_id (category_id),
     INDEX idx_items_status (status),
-    INDEX idx_items_created_at (created_at)
+    INDEX idx_items_created_at (created_at),
+    INDEX idx_items_category_created_at (category_id, created_at),
+    FULLTEXT INDEX ft_items_title (title)
 );
 
 CREATE TABLE orders (
@@ -68,9 +70,12 @@ CREATE TABLE orders (
     CONSTRAINT fk_orders_item
         FOREIGN KEY (item_id) REFERENCES items(item_id),
     INDEX idx_orders_user_id (user_id),
-    INDEX idx_orders_item_id (item_id),
+    UNIQUE INDEX uk_orders_item_id (item_id),
     INDEX idx_orders_status (status),
-    INDEX idx_orders_created_at (created_at)
+    INDEX idx_orders_created_at (created_at),
+    INDEX idx_orders_user_created_at (user_id, created_at),
+    INDEX idx_orders_user_status_created_at (user_id, status, created_at),
+    INDEX idx_orders_status_created_at (status, created_at)
 );
 
 CREATE TABLE profiles (

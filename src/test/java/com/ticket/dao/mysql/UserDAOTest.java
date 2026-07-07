@@ -95,6 +95,12 @@ class UserDAOTest {
         Assertions.assertTrue(PasswordUtil.matches(password, hash));
     }
 
+    @Test
+    void shouldRejectWeakPassword() {
+        Assertions.assertThrows(RuntimeException.class, () -> PasswordUtil.hashPassword("simple1"));
+        Assertions.assertFalse(PasswordUtil.matches("Ticket@123", null));
+    }
+
     private User buildUser(String username, String email, String phone, String role, int status) {
         User user = new User();
         user.setUsername(username);

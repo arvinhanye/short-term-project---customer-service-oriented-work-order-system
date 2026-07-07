@@ -95,6 +95,7 @@ public class UserService {
         if (!actor.getUserId().equals(profile.getUserId()) && !isAdmin(actor)) {
             throw new BusinessException("无权修改该用户档案");
         }
+        validateProfile(profile);
         profileDAO.upsert(profile);
         writeActionLog(String.valueOf(actor.getUserId()), null, "UPDATE_PROFILE");
     }
@@ -142,9 +143,7 @@ public class UserService {
         if (username == null || username.isBlank() || username.length() > 50) {
             throw new BusinessException("用户名长度不合法");
         }
-        if (password == null || password.length() < 6 || password.length() > 64) {
-            throw new BusinessException("密码长度不合法");
-        }
+        PasswordUtil.validateStrength(password);
         validateEmail(email);
         validatePhone(phone);
     }
@@ -159,6 +158,28 @@ public class UserService {
         if (phone == null || phone.length() > 20 || !PHONE_PATTERN.matcher(phone.trim()).matches()) {
             throw new BusinessException("手机号格式不正确");
         }
+    }
+
+    private void validateProfile(Profile profile) {
+        if (profile == null || profile.getUserId() == null) {
+            throw new BusinessException("用户档案不完整");
+        }
+        if (tooLong(profile.getRealName(), 50)) {
+            throw new BusinessException("真实姓名长度不合法");
+        }
+        if (tooLong(profile.getIdCard(), 20)) {
+            throw new BusinessException("身份证号长度不合法");
+        }
+        if (tooLong(profile.getAddress(), 500)) {
+            throw new BusinessException("地址长度不合法");
+        }
+        if (tooLong(profile.getNotes(), 1000)) {
+            throw new BusinessException("备注长度不合法");
+        }
+    }
+
+    private boolean tooLong(String value, int maxLength) {
+        return value != null && value.length() > maxLength;
     }
 
     private void writeActionLog(String userId, String itemId, String actionType) {

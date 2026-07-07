@@ -4,6 +4,7 @@ import com.ticket.dao.mongo.CommentDAO;
 import com.ticket.dao.mongo.DetailDAO;
 import com.ticket.dao.mongo.LogDAO;
 import com.ticket.dao.mongo.SystemLogDAO;
+import com.ticket.dao.mysql.CategoryDAO;
 import com.ticket.dao.mysql.ItemDAO;
 import com.ticket.dao.mysql.OrderDAO;
 import com.ticket.dao.mysql.ProfileDAO;
@@ -28,6 +29,7 @@ import java.util.List;
 
 public class BusinessService {
     private final ItemDAO itemDAO = new ItemDAO();
+    private final CategoryDAO categoryDAO = new CategoryDAO();
     private final OrderDAO orderDAO = new OrderDAO();
     private final UserDAO userDAO = new UserDAO();
     private final ProfileDAO profileDAO = new ProfileDAO();
@@ -44,7 +46,16 @@ public class BusinessService {
         if (amount == null || amount.signum() < 0) {
             throw new BusinessException("金额不能为负数");
         }
-        validatePriority(priority);
+        if (amount.scale() > 2) {
+            throw new BusinessException("金额最多保留 2 位小数");
+        }
+        if (categoryId == null || categoryDAO.findById(categoryId) == null) {
+            throw new BusinessException("工单分类不存在");
+        }
+        if (description != null && description.length() > 4000) {
+            throw new BusinessException("工单描述过长");
+        }
+        String normalizedPriority = validatePriority(priority);
         Item item = new Item();
         item.setTitle(title.trim());
         item.setCategoryId(categoryId);
@@ -65,7 +76,7 @@ public class BusinessService {
                 itemId = itemDAO.insert(connection, item);
                 order.setItemId(itemId);
                 orderDAO.insert(connection, order);
-                ItemDetail detail = buildDetail(itemId, actor.getUserId(), description, priority);
+                ItemDetail detail = buildDetail(itemId, actor.getUserId(), description, normalizedPriority);
                 detailDAO.upsert(detail);
                 connection.commit();
                 writeActionLog(String.valueOf(actor.getUserId()), String.valueOf(itemId), "CREATE_ITEM");
@@ -226,10 +237,12 @@ public class BusinessService {
         return detail;
     }
 
-    private void validatePriority(String priority) {
-        if (!List.of("LOW", "MEDIUM", "HIGH", "URGENT").contains(priority)) {
+    private String validatePriority(String priority) {
+        String normalized = priority == null ? "" : priority.trim().toUpperCase();
+        if (!List.of("LOW", "MEDIUM", "HIGH", "URGENT").contains(normalized)) {
             throw new BusinessException("优先级非法");
         }
+        return normalized;
     }
 
     private void writeActionLog(String userId, String itemId, String actionType) {

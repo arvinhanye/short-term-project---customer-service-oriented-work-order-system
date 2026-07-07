@@ -9,8 +9,17 @@ import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.util.List;
+import javax.sql.DataSource;
 
 public class OrderDAO extends BaseDAO {
+    public OrderDAO() {
+        super();
+    }
+
+    public OrderDAO(DataSource dataSource) {
+        super(dataSource);
+    }
+
     public long insert(Connection connection, Order order) throws Exception {
         String sql = "INSERT INTO orders (user_id, item_id, amount, status, created_at) VALUES (?, ?, ?, ?, ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
@@ -47,65 +56,55 @@ public class OrderDAO extends BaseDAO {
     }
 
     public PageResult<Order> pageByUserAndStatus(Long userId, Integer status, int page, int pageSize) {
-        String countSql = "SELECT COUNT(*) AS cnt FROM orders WHERE user_id = ? AND (? IS NULL OR status = ?)";
-        long total = queryOne(countSql, statement -> {
-            statement.setLong(1, userId);
-            if (status == null) {
-                statement.setNull(2, java.sql.Types.INTEGER);
-                statement.setNull(3, java.sql.Types.INTEGER);
-            } else {
-                statement.setInt(2, status);
-                statement.setInt(3, status);
-            }
-        }, rs -> rs.getLong("cnt"));
-
-        List<Order> orders = query(
-            "SELECT * FROM orders WHERE user_id = ? AND (? IS NULL OR status = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            statement -> {
-                statement.setLong(1, userId);
-                if (status == null) {
-                    statement.setNull(2, java.sql.Types.INTEGER);
-                    statement.setNull(3, java.sql.Types.INTEGER);
-                } else {
+        int normalizedPage = normalizePage(page);
+        int normalizedPageSize = normalizeLimit(pageSize);
+        long total = status == null
+            ? queryOne("SELECT COUNT(*) AS cnt FROM orders WHERE user_id = ?",
+                statement -> statement.setLong(1, userId), rs -> rs.getLong("cnt"))
+            : queryOne("SELECT COUNT(*) AS cnt FROM orders WHERE user_id = ? AND status = ?",
+                statement -> {
+                    statement.setLong(1, userId);
                     statement.setInt(2, status);
-                    statement.setInt(3, status);
-                }
-                statement.setInt(4, pageSize);
-                statement.setInt(5, Math.max(0, (page - 1) * pageSize));
-            },
-            this::mapOrder
-        );
-        return new PageResult<>(orders, total, page, pageSize);
+                }, rs -> rs.getLong("cnt"));
+
+        List<Order> orders = status == null
+            ? query("SELECT * FROM orders WHERE user_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                statement -> {
+                    statement.setLong(1, userId);
+                    statement.setInt(2, normalizedPageSize);
+                    statement.setInt(3, offset(normalizedPage, normalizedPageSize));
+                }, this::mapOrder)
+            : query("SELECT * FROM orders WHERE user_id = ? AND status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                statement -> {
+                    statement.setLong(1, userId);
+                    statement.setInt(2, status);
+                    statement.setInt(3, normalizedPageSize);
+                    statement.setInt(4, offset(normalizedPage, normalizedPageSize));
+                }, this::mapOrder);
+        return new PageResult<>(orders, total, normalizedPage, normalizedPageSize);
     }
 
     public PageResult<Order> pageAllByStatus(Integer status, int page, int pageSize) {
-        String countSql = "SELECT COUNT(*) AS cnt FROM orders WHERE (? IS NULL OR status = ?)";
-        long total = queryOne(countSql, statement -> {
-            if (status == null) {
-                statement.setNull(1, java.sql.Types.INTEGER);
-                statement.setNull(2, java.sql.Types.INTEGER);
-            } else {
-                statement.setInt(1, status);
-                statement.setInt(2, status);
-            }
-        }, rs -> rs.getLong("cnt"));
+        int normalizedPage = normalizePage(page);
+        int normalizedPageSize = normalizeLimit(pageSize);
+        long total = status == null
+            ? queryOne("SELECT COUNT(*) AS cnt FROM orders", null, rs -> rs.getLong("cnt"))
+            : queryOne("SELECT COUNT(*) AS cnt FROM orders WHERE status = ?",
+                statement -> statement.setInt(1, status), rs -> rs.getLong("cnt"));
 
-        List<Order> orders = query(
-            "SELECT * FROM orders WHERE (? IS NULL OR status = ?) ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            statement -> {
-                if (status == null) {
-                    statement.setNull(1, java.sql.Types.INTEGER);
-                    statement.setNull(2, java.sql.Types.INTEGER);
-                } else {
+        List<Order> orders = status == null
+            ? query("SELECT * FROM orders ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                statement -> {
+                    statement.setInt(1, normalizedPageSize);
+                    statement.setInt(2, offset(normalizedPage, normalizedPageSize));
+                }, this::mapOrder)
+            : query("SELECT * FROM orders WHERE status = ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                statement -> {
                     statement.setInt(1, status);
-                    statement.setInt(2, status);
-                }
-                statement.setInt(3, pageSize);
-                statement.setInt(4, Math.max(0, (page - 1) * pageSize));
-            },
-            this::mapOrder
-        );
-        return new PageResult<>(orders, total, page, pageSize);
+                    statement.setInt(2, normalizedPageSize);
+                    statement.setInt(3, offset(normalizedPage, normalizedPageSize));
+                }, this::mapOrder);
+        return new PageResult<>(orders, total, normalizedPage, normalizedPageSize);
     }
 
     public void updateStatus(Connection connection, Long orderId, int status) throws Exception {
@@ -122,6 +121,14 @@ public class OrderDAO extends BaseDAO {
 
     private int normalizeLimit(int limit) {
         return Math.max(1, Math.min(limit, 100));
+    }
+
+    private int normalizePage(int page) {
+        return Math.max(1, page);
+    }
+
+    private int offset(int page, int pageSize) {
+        return Math.max(0, (page - 1) * pageSize);
     }
 
     private Order mapOrder(java.sql.ResultSet resultSet) throws java.sql.SQLException {

@@ -10,6 +10,7 @@
 - 用户模块基础能力：注册、登录、资料维护、用户状态控制
 - 工单模块基础能力：创建工单、查看我的工单、查看详情、回复、评价、状态流转、客服分配
 - 统计报表模块：MySQL 月度报表存储过程调用、MongoDB 聚合统计、系统日志审计查询
+- 稳定版加固：分页 SQL 优化、性能索引、批处理状态流转、密码强度校验、系统自检
 - Swing 基础工作台：登录页、注册页、普通用户工作台、ADMIN 工作台
 
 ## 目录结构
@@ -39,6 +40,9 @@ ticket-management/
 - [Day04 交付记录：行为日志模块与聚合统计](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day04-delivery.md)
 - [Day05 交付记录：推荐功能与跨数据库联查](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day05-delivery.md)
 - [Day06 交付记录：数据统计与报表模块](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day06-delivery.md)
+- [Day07 交付记录：性能优化、安全加固与系统集成](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-delivery.md)
+- [Day07 性能优化报告](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-performance-report.md)
+- [Day07 安全检查清单](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-security-checklist.md)
 - 代码仓库远程：`origin` 指向 Gitee，`github` 指向 GitHub
 
 ## 环境要求
@@ -58,6 +62,8 @@ ticket-management/
 4. `src/main/resources/sql/mysql_triggers.sql`
 5. `src/main/resources/sql/mysql_init_data.sql`
 6. `src/main/resources/sql/mongodb_init.js`
+
+如果数据库已经按旧版本初始化，可额外执行 `src/main/resources/sql/mysql_day07_optimization.sql` 补充 Day07 性能索引。
 
 ## 配置说明
 

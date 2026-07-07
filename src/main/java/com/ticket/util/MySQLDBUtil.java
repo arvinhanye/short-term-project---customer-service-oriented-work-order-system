@@ -22,6 +22,10 @@ public final class MySQLDBUtil {
             config.setPassword(DBConfig.get("mysql.password"));
             config.setMaximumPoolSize(DBConfig.getInt("mysql.pool.maximumPoolSize", 10));
             config.setMinimumIdle(DBConfig.getInt("mysql.pool.minimumIdle", 2));
+            config.setConnectionTimeout(DBConfig.getInt("mysql.pool.connectionTimeoutMs", 30000));
+            config.setIdleTimeout(DBConfig.getInt("mysql.pool.idleTimeoutMs", 600000));
+            config.setMaxLifetime(DBConfig.getInt("mysql.pool.maxLifetimeMs", 1800000));
+            config.setLeakDetectionThreshold(DBConfig.getInt("mysql.pool.leakDetectionThresholdMs", 0));
             config.setPoolName("ticket-management-pool");
             dataSource = new HikariDataSource(config);
             LOGGER.info("Initialized HikariCP datasource");

@@ -1,0 +1,51 @@
+package com.ticket.service;
+
+import com.ticket.dao.mysql.CategoryDAO;
+import com.ticket.dao.mysql.OrderDAO;
+import com.ticket.dto.HealthCheckDTO;
+import com.ticket.model.User;
+import com.ticket.util.MongoDBUtil;
+import com.ticket.util.MySQLDBUtil;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import org.bson.Document;
+
+public class SystemHealthService {
+    private final CategoryDAO categoryDAO = new CategoryDAO();
+    private final OrderDAO orderDAO = new OrderDAO();
+
+    public HealthCheckDTO runFullCheck(User actor) {
+        UserService.requireAdmin(actor);
+        HealthCheckDTO result = new HealthCheckDTO();
+        check(result, "MySQL 连接", this::checkMysqlConnection);
+        check(result, "MongoDB 连接", this::checkMongoConnection);
+        check(result, "分类 DAO 查询", () -> categoryDAO.findAll());
+        check(result, "工单分页查询", () -> orderDAO.pageAllByStatus(null, 1, 5));
+        return result;
+    }
+
+    private void checkMysqlConnection() throws Exception {
+        try (Connection connection = MySQLDBUtil.getDataSource().getConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT 1")) {
+            statement.executeQuery();
+        }
+    }
+
+    private void checkMongoConnection() {
+        MongoDBUtil.getDatabase().runCommand(new Document("ping", 1));
+    }
+
+    private void check(HealthCheckDTO result, String checkName, CheckedRunnable runnable) {
+        try {
+            runnable.run();
+            result.pass(checkName);
+        } catch (Exception ex) {
+            result.fail(checkName, ex);
+        }
+    }
+
+    @FunctionalInterface
+    private interface CheckedRunnable {
+        void run() throws Exception;
+    }
+}
