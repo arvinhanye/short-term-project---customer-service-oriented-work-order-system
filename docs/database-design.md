@@ -14,6 +14,7 @@
 erDiagram
     users ||--o| profiles : has
     users ||--o{ orders : submits
+    users ||--o{ system_log_import_records : imports
     categories ||--o{ categories : parent
     categories ||--o{ items : classifies
     items ||--|| orders : owns
@@ -60,6 +61,17 @@ erDiagram
         BIGINT item_id FK
         DECIMAL amount
         TINYINT status
+        DATETIME created_at
+    }
+
+    system_log_import_records {
+        BIGINT import_id PK
+        BIGINT user_id FK
+        VARCHAR log_type
+        VARCHAR log_level
+        VARCHAR message
+        VARCHAR ip
+        VARCHAR operation
         DATETIME created_at
     }
 ```
@@ -146,6 +158,29 @@ erDiagram
 | `idx_orders_user_created_at(user_id, created_at)` | 普通用户“我的工单”分页 |
 | `idx_orders_user_status_created_at(user_id, status, created_at)` | 普通用户按状态筛选分页 |
 | `idx_orders_status_created_at(status, created_at)` | 管理员按状态筛选分页 |
+
+### 3.6 system_log_import_records
+
+系统日志批量导入表，用于通过 JDBC `PreparedStatement.addBatch()` 和 `executeBatch()` 批量导入审计日志归档或测试日志数据。MongoDB `system_logs` 仍是在线审计查询的主存储，本表用于满足关系库批处理导入和验收演示场景。
+
+| 字段 | 类型 | 约束 | 说明 |
+| --- | --- | --- | --- |
+| import_id | BIGINT | PK, AUTO_INCREMENT | 导入记录编号 |
+| user_id | BIGINT | FK, NULL | 关联用户，匿名或失败登录可为空 |
+| log_type | VARCHAR(50) | NOT NULL | 日志类型 |
+| log_level | VARCHAR(20) | NOT NULL | 日志级别 |
+| message | VARCHAR(500) | NOT NULL | 日志消息 |
+| ip | VARCHAR(64) |  | 客户端 IP |
+| operation | VARCHAR(200) |  | 操作标识 |
+| created_at | DATETIME | NOT NULL | 日志时间 |
+
+常用索引：
+
+| 索引 | 说明 |
+| --- | --- |
+| `idx_log_import_user_created_at(user_id, created_at)` | 按用户查询导入日志 |
+| `idx_log_import_type_created_at(log_type, created_at)` | 按类型查询导入日志 |
+| `idx_log_import_level_created_at(log_level, created_at)` | 按级别查询导入日志 |
 
 ## 4. MySQL 视图、过程与触发器
 

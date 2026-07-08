@@ -9,6 +9,7 @@ SET FOREIGN_KEY_CHECKS = 0;
 DROP VIEW IF EXISTS v_business_summary;
 DROP VIEW IF EXISTS v_user_detail;
 
+DROP TABLE IF EXISTS system_log_import_records;
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS items;
 DROP TABLE IF EXISTS profiles;
@@ -89,4 +90,20 @@ CREATE TABLE profiles (
         FOREIGN KEY (user_id) REFERENCES users(user_id),
     CONSTRAINT uk_profiles_user_id UNIQUE (user_id),
     INDEX idx_profiles_user_id (user_id)
+);
+
+CREATE TABLE system_log_import_records (
+    import_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    user_id BIGINT NULL,
+    log_type VARCHAR(50) NOT NULL,
+    log_level VARCHAR(20) NOT NULL,
+    message VARCHAR(500) NOT NULL,
+    ip VARCHAR(64),
+    operation VARCHAR(200),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_log_import_user
+        FOREIGN KEY (user_id) REFERENCES users(user_id),
+    INDEX idx_log_import_user_created_at (user_id, created_at),
+    INDEX idx_log_import_type_created_at (log_type, created_at),
+    INDEX idx_log_import_level_created_at (log_level, created_at)
 );
