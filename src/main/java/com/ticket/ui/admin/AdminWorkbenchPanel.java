@@ -142,7 +142,7 @@ public class AdminWorkbenchPanel extends JPanel {
 
     private void showConnectionPoolStatus() {
         try {
-            DefaultTableModel model = new DefaultTableModel(new Object[]{"指标", "当前值", "说明"}, 0);
+            DefaultTableModel model = new DefaultTableModel(new Object[]{"连接角色", "指标", "当前值", "说明"}, 0);
 
             JTable table = new JTable(model);
             table.setEnabled(false);
@@ -159,6 +159,7 @@ public class AdminWorkbenchPanel extends JPanel {
             dialog.setLayout(new BorderLayout());
             dialog.add(toolbar, BorderLayout.NORTH);
             dialog.add(new JScrollPane(table), BorderLayout.CENTER);
+            connectionPoolMonitorService.recordPanelView(currentUser);
             Runnable refresh = () -> refreshConnectionPoolModel(model, statusLabel);
             refresh.run();
             Timer timer = new Timer(800, event -> refresh.run());
@@ -186,30 +187,38 @@ public class AdminWorkbenchPanel extends JPanel {
 
     private void refreshConnectionPoolModel(DefaultTableModel model, JLabel statusLabel) {
         try {
-            ConnectionPoolStatusDTO status = connectionPoolMonitorService.currentStatus(currentUser);
+            var statuses = connectionPoolMonitorService.currentStatuses(currentUser);
             model.setRowCount(0);
-            model.addRow(new Object[]{"连接池名称", status.getPoolName(), "HikariCP poolName"});
-            model.addRow(new Object[]{"状态", status.getStatusText(), "根据连接占用和等待线程判断"});
-            model.addRow(new Object[]{"最大连接数", status.getMaximumPoolSize(), "连接池允许创建的最大 MySQL 连接数"});
-            model.addRow(new Object[]{"最小空闲连接", status.getMinimumIdle(), "连接池尽量保持的空闲连接数"});
-            model.addRow(new Object[]{"正在使用连接", status.getActiveConnections(), "当前被业务代码借出的连接数"});
-            model.addRow(new Object[]{"空闲连接", status.getIdleConnections(), "当前可直接复用的连接数"});
-            model.addRow(new Object[]{"总连接数", status.getTotalConnections(), "当前池内实际连接总数"});
-            model.addRow(new Object[]{"等待连接线程", status.getThreadsAwaitingConnection(), "正在等待连接的线程数量"});
-            model.addRow(new Object[]{"使用率", status.getUsagePercent() + "%", "正在使用连接 / 最大连接数"});
-            model.addRow(new Object[]{"连接等待超时", formatMs(status.getConnectionTimeoutMs()), "获取连接最长等待时间"});
-            model.addRow(new Object[]{"空闲超时", formatMs(status.getIdleTimeoutMs()), "空闲连接保留时间"});
-            model.addRow(new Object[]{"连接最长生命周期", formatMs(status.getMaxLifetimeMs()), "单个连接最长存活时间"});
-            model.addRow(new Object[]{"泄漏检测阈值", formatMs(status.getLeakDetectionThresholdMs()), "0 表示未开启泄漏检测"});
-            statusLabel.setText("状态：" + status.getStatusText() + "，使用率：" + status.getUsagePercent() + "%");
-            centerArea.setText("连接池状态：" + status.getStatusText()
-                + "\n正在使用连接：" + status.getActiveConnections()
-                + "\n空闲连接：" + status.getIdleConnections()
-                + "\n等待连接线程：" + status.getThreadsAwaitingConnection());
-            rightArea.setText("连接池使用率：" + status.getUsagePercent() + "%");
+            for (ConnectionPoolStatusDTO status : statuses) {
+                addPoolRows(model, status);
+            }
+            String summary = statuses.stream()
+                .map(status -> status.getRole() + "=" + status.getStatusText() + "(" + status.getUsagePercent() + "%)")
+                .reduce((left, right) -> left + "，" + right)
+                .orElse("无连接池状态");
+            statusLabel.setText("状态：" + summary);
+            centerArea.setText("连接池读写分离状态：\n" + summary);
+            rightArea.setText("SELECT 默认走 READ 池，写入、更新和事务默认走 WRITE 池。");
         } catch (Exception ex) {
             statusLabel.setText("刷新失败：" + ex.getMessage());
         }
+    }
+
+    private void addPoolRows(DefaultTableModel model, ConnectionPoolStatusDTO status) {
+        String role = "WRITE".equals(status.getRole()) ? "写池" : "读池";
+        model.addRow(new Object[]{role, "连接池名称", status.getPoolName(), "HikariCP poolName"});
+        model.addRow(new Object[]{role, "状态", status.getStatusText(), "根据连接占用和等待线程判断"});
+        model.addRow(new Object[]{role, "最大连接数", status.getMaximumPoolSize(), "连接池允许创建的最大 MySQL 连接数"});
+        model.addRow(new Object[]{role, "最小空闲连接", status.getMinimumIdle(), "连接池尽量保持的空闲连接数"});
+        model.addRow(new Object[]{role, "正在使用连接", status.getActiveConnections(), "当前被业务代码借出的连接数"});
+        model.addRow(new Object[]{role, "空闲连接", status.getIdleConnections(), "当前可直接复用的连接数"});
+        model.addRow(new Object[]{role, "总连接数", status.getTotalConnections(), "当前池内实际连接总数"});
+        model.addRow(new Object[]{role, "等待连接线程", status.getThreadsAwaitingConnection(), "正在等待连接的线程数量"});
+        model.addRow(new Object[]{role, "使用率", status.getUsagePercent() + "%", "正在使用连接 / 最大连接数"});
+        model.addRow(new Object[]{role, "连接等待超时", formatMs(status.getConnectionTimeoutMs()), "获取连接最长等待时间"});
+        model.addRow(new Object[]{role, "空闲超时", formatMs(status.getIdleTimeoutMs()), "空闲连接保留时间"});
+        model.addRow(new Object[]{role, "连接最长生命周期", formatMs(status.getMaxLifetimeMs()), "单个连接最长存活时间"});
+        model.addRow(new Object[]{role, "泄漏检测阈值", formatMs(status.getLeakDetectionThresholdMs()), "0 表示未开启泄漏检测"});
     }
 
     private void simulateConnectionUsage(JButton simulateButton, Runnable refresh) {

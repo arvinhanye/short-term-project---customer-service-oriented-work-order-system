@@ -13,6 +13,7 @@
 - 稳定版加固：分页 SQL 优化、性能索引、批处理状态流转、密码强度校验、系统自检
 - 测试与重构：JUnit5 单元测试、事务回滚测试、行为日志压力测试入口、公共日志服务重构
 - Swing 基础工作台：登录页、注册页、普通用户工作台、ADMIN 工作台
+- 加分项增强：连接池监控面板、MySQL 读写分离连接池、连接故障自动重连、操作审计日志落库与落盘
 
 ## 目录结构
 
@@ -78,10 +79,20 @@ ticket-management/
 - `mysql.url`
 - `mysql.username`
 - `mysql.password`
+- `mysql.write.url` / `mysql.write.username` / `mysql.write.password`
+- `mysql.read.url` / `mysql.read.username` / `mysql.read.password`
+- `mysql.write.pool.maximumPoolSize` / `mysql.read.pool.maximumPoolSize`
 - `mongodb.uri`
 - `mongodb.database`
 
-请根据本机环境修改账号密码后再运行。
+默认读写库都指向同一个本机 MySQL，便于单机运行；如有 MySQL 主从或只读副本，可把 `mysql.read.url` 改为只读实例地址，DAO 层的 `SELECT` 会走 READ 池，写入、更新和事务会走 WRITE 池。请根据本机环境修改账号密码后再运行。
+
+## 加分项说明
+
+- 连接池监控面板：ADMIN 工作台点击“连接池监控”，可查看 READ/WRITE 两个 HikariCP 池的活跃连接、空闲连接、等待线程、使用率和超时配置，并支持模拟占用连接。
+- 读写分离思路：`BaseDAO` 默认将查询路由到 `MySQLDBUtil.getReadConnection()`，更新和事务路由到 `MySQLDBUtil.getWriteConnection()`；服务层手写事务也显式使用写连接。
+- 数据库连接故障自动重连：获取连接失败或 DAO 捕获连接类 SQL 异常时，会重建对应 HikariCP 读池或写池并重试一次。
+- 操作审计日志：关键登录、注册、资料维护、工单创建、状态流转、客服分配、批处理、连接池监控操作写入 MongoDB `system_logs`，同时通过 Logback 写入 `logs/audit.log`；行为日志写入 MongoDB `action_logs` 并同步记录到 `logs/app.log`。
 
 ## 构建与运行
 

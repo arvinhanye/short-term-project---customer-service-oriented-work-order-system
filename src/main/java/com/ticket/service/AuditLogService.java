@@ -3,8 +3,11 @@ package com.ticket.service;
 import com.ticket.dao.mongo.SystemLogDAO;
 import com.ticket.model.SystemLog;
 import java.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class AuditLogService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(AuditLogService.class);
     private final SystemLogDAO systemLogDAO;
 
     public AuditLogService() {
@@ -26,6 +29,12 @@ public class AuditLogService {
         actionDetail.setOperation(operation);
         log.setActionDetail(actionDetail);
         log.setTimestamp(Instant.now());
-        systemLogDAO.insert(log);
+        LOGGER.info("AUDIT userId={} type={} level={} operation={} message={}",
+            userId, logType, level, operation, message);
+        try {
+            systemLogDAO.insert(log);
+        } catch (Exception ex) {
+            LOGGER.error("Failed to persist audit log to MongoDB, operation={}", operation, ex);
+        }
     }
 }

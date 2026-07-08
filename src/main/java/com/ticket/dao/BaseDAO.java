@@ -14,7 +14,7 @@ public abstract class BaseDAO {
     private final DataSource dataSource;
 
     protected BaseDAO() {
-        this(MySQLDBUtil.getDataSource());
+        this(null);
     }
 
     protected BaseDAO(DataSource dataSource) {
@@ -22,15 +22,35 @@ public abstract class BaseDAO {
     }
 
     protected DataSource dataSource() {
-        return dataSource;
+        return dataSource == null ? MySQLDBUtil.getWriteDataSource() : dataSource;
     }
 
     protected Connection getConnection() throws SQLException {
-        return dataSource().getConnection();
+        return getWriteConnection();
+    }
+
+    protected Connection getReadConnection() throws SQLException {
+        return dataSource == null ? MySQLDBUtil.getReadConnection() : dataSource.getConnection();
+    }
+
+    protected Connection getWriteConnection() throws SQLException {
+        return dataSource == null ? MySQLDBUtil.getWriteConnection() : dataSource.getConnection();
     }
 
     protected <T> List<T> query(String sql, SqlConsumer<PreparedStatement> binder, RowMapper<T> mapper) {
-        try (Connection connection = getConnection();
+        try {
+            return queryOnce(sql, binder, mapper);
+        } catch (DBException ex) {
+            if (dataSource == null && MySQLDBUtil.isConnectionException(ex)) {
+                MySQLDBUtil.reconnectReadDataSource();
+                return queryOnce(sql, binder, mapper);
+            }
+            throw ex;
+        }
+    }
+
+    private <T> List<T> queryOnce(String sql, SqlConsumer<PreparedStatement> binder, RowMapper<T> mapper) {
+        try (Connection connection = getReadConnection();
              PreparedStatement statement = connection.prepareStatement(sql)) {
             if (binder != null) {
                 binder.accept(statement);
@@ -64,7 +84,19 @@ public abstract class BaseDAO {
     }
 
     protected <T> T executeTransactionCallback(TransactionCallback<T> callback) {
-        try (Connection connection = getConnection()) {
+        try {
+            return executeTransactionCallbackOnce(callback);
+        } catch (DBException ex) {
+            if (dataSource == null && MySQLDBUtil.isConnectionException(ex)) {
+                MySQLDBUtil.reconnectWriteDataSource();
+                return executeTransactionCallbackOnce(callback);
+            }
+            throw ex;
+        }
+    }
+
+    private <T> T executeTransactionCallbackOnce(TransactionCallback<T> callback) {
+        try (Connection connection = getWriteConnection()) {
             connection.setAutoCommit(false);
             try {
                 T result = callback.execute(connection);

@@ -19,7 +19,8 @@ public class Main {
         }));
 
         try {
-            MySQLDBUtil.getDataSource();
+            MySQLDBUtil.getWriteDataSource();
+            MySQLDBUtil.getReadDataSource();
             MongoDBUtil.getDatabase();
         } catch (Exception ex) {
             LOGGER.error("Failed to initialize database clients", ex);

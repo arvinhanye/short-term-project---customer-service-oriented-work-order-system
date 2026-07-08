@@ -9,9 +9,22 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class ConnectionPoolMonitorService {
+    private final AuditLogService auditLogService = new AuditLogService();
+
     public ConnectionPoolStatusDTO currentStatus(User actor) {
         UserService.requireAdmin(actor);
         return MySQLDBUtil.getPoolStatus();
+    }
+
+    public List<ConnectionPoolStatusDTO> currentStatuses(User actor) {
+        UserService.requireAdmin(actor);
+        return MySQLDBUtil.getAllPoolStatuses();
+    }
+
+    public void recordPanelView(User actor) {
+        UserService.requireAdmin(actor);
+        auditLogService.write(String.valueOf(actor.getUserId()), "ADMIN_OPERATION", "INFO",
+            "查看连接池监控面板", "VIEW_CONNECTION_POOL");
     }
 
     public void simulateConnectionUsage(User actor, int requestedConnections, int holdSeconds) {
@@ -22,13 +35,15 @@ public class ConnectionPoolMonitorService {
         List<Connection> connections = new ArrayList<>();
         try {
             for (int index = 0; index < connectionCount; index++) {
-                Connection connection = MySQLDBUtil.getDataSource().getConnection();
+                Connection connection = MySQLDBUtil.getWriteConnection();
                 try (PreparedStatement statement = connection.prepareStatement("SELECT 1")) {
                     statement.executeQuery();
                 }
                 connections.add(connection);
             }
             Thread.sleep(normalizedSeconds * 1000L);
+            auditLogService.write(String.valueOf(actor.getUserId()), "ADMIN_OPERATION", "INFO",
+                "模拟占用连接：" + connectionCount + " 个，持续 " + normalizedSeconds + " 秒", "SIMULATE_CONNECTION_USAGE");
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         } catch (Exception ex) {

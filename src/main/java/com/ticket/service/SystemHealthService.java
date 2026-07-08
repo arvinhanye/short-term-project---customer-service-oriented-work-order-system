@@ -17,15 +17,23 @@ public class SystemHealthService {
     public HealthCheckDTO runFullCheck(User actor) {
         UserService.requireAdmin(actor);
         HealthCheckDTO result = new HealthCheckDTO();
-        check(result, "MySQL 连接", this::checkMysqlConnection);
+        check(result, "MySQL 写库连接", this::checkMysqlWriteConnection);
+        check(result, "MySQL 读库连接", this::checkMysqlReadConnection);
         check(result, "MongoDB 连接", this::checkMongoConnection);
         check(result, "分类 DAO 查询", () -> categoryDAO.findAll());
         check(result, "工单分页查询", () -> orderDAO.pageAllByStatus(null, 1, 5));
         return result;
     }
 
-    private void checkMysqlConnection() throws Exception {
-        try (Connection connection = MySQLDBUtil.getDataSource().getConnection();
+    private void checkMysqlWriteConnection() throws Exception {
+        try (Connection connection = MySQLDBUtil.getWriteConnection();
+             PreparedStatement statement = connection.prepareStatement("SELECT 1")) {
+            statement.executeQuery();
+        }
+    }
+
+    private void checkMysqlReadConnection() throws Exception {
+        try (Connection connection = MySQLDBUtil.getReadConnection();
              PreparedStatement statement = connection.prepareStatement("SELECT 1")) {
             statement.executeQuery();
         }

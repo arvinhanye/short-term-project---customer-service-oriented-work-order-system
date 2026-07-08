@@ -66,7 +66,7 @@ public class BusinessService {
         order.setCreatedAt(LocalDateTime.now());
 
         Long itemId = null;
-        try (Connection connection = MySQLDBUtil.getDataSource().getConnection()) {
+        try (Connection connection = MySQLDBUtil.getWriteConnection()) {
             connection.setAutoCommit(false);
             try {
                 itemId = itemDAO.insert(connection, item);
@@ -76,6 +76,8 @@ public class BusinessService {
                 detailDAO.upsert(detail);
                 connection.commit();
                 actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "CREATE_ITEM");
+                auditLogService.write(String.valueOf(actor.getUserId()), "TICKET_OPERATION", "INFO",
+                    "创建工单：" + item.getTitle(), "CREATE_ITEM");
                 return itemId;
             } catch (Exception ex) {
                 connection.rollback();
@@ -148,7 +150,7 @@ public class BusinessService {
             throw new BusinessException("工单记录不存在");
         }
         validateStatusTransition(order.getStatus(), newStatus);
-        try (Connection connection = MySQLDBUtil.getDataSource().getConnection()) {
+        try (Connection connection = MySQLDBUtil.getWriteConnection()) {
             connection.setAutoCommit(false);
             try {
                 orderDAO.updateStatus(connection, orderId, newStatus);
@@ -180,6 +182,8 @@ public class BusinessService {
         detail.getMetadata().setLastProcessedAt(Instant.now());
         detailDAO.upsert(detail);
         actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "ASSIGN");
+        auditLogService.write(String.valueOf(actor.getUserId()), "ADMIN_OPERATION", "INFO",
+            "分配工单 " + itemId + " 给管理员 " + adminId, "ASSIGN_ADMIN");
     }
 
     public static void validateStatusTransition(int oldStatus, int newStatus) {
@@ -215,6 +219,10 @@ public class BusinessService {
         comment.setCreatedAt(Instant.now());
         commentDAO.insert(comment);
         actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "ADD_COMMENT");
+        if (adminOnlyAction || "CUSTOMER_RATING".equals(tag)) {
+            auditLogService.write(String.valueOf(actor.getUserId()), "TICKET_OPERATION", "INFO",
+                "新增工单评论，类型：" + tag, "ADD_COMMENT");
+        }
     }
 
     private ItemDetail buildDetail(Long itemId, Long userId, String description, String priority) {

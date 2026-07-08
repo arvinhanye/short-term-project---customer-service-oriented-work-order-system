@@ -3,8 +3,11 @@ package com.ticket.service;
 import com.ticket.dao.mongo.LogDAO;
 import com.ticket.model.ActionLog;
 import java.time.Instant;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public class ActionLogService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(ActionLogService.class);
     private final LogDAO logDAO;
 
     public ActionLogService() {
@@ -26,6 +29,11 @@ public class ActionLogService {
         clientInfo.setIp("127.0.0.1");
         log.setClientInfo(clientInfo);
         log.setCreatedAt(Instant.now());
-        logDAO.insert(log);
+        LOGGER.info("ACTION userId={} itemId={} actionType={}", userId, itemId, actionType);
+        try {
+            logDAO.insert(log);
+        } catch (Exception ex) {
+            LOGGER.error("Failed to persist action log to MongoDB, actionType={}", actionType, ex);
+        }
     }
 }

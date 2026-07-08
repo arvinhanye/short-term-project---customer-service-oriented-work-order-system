@@ -37,7 +37,7 @@ public class UserService {
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
         Long userId;
-        try (Connection connection = MySQLDBUtil.getDataSource().getConnection()) {
+        try (Connection connection = MySQLDBUtil.getWriteConnection()) {
             connection.setAutoCommit(false);
             try {
                 userId = userDAO.insert(connection, user);
@@ -83,6 +83,8 @@ public class UserService {
         validatePhone(user.getPhone());
         userDAO.updateBasicInfo(user);
         actionLogService.write(String.valueOf(actor.getUserId()), null, "UPDATE_PROFILE");
+        auditLogService.write(String.valueOf(actor.getUserId()), "USER_OPERATION", "INFO",
+            "更新用户基础资料", "UPDATE_USER_BASIC_INFO");
     }
 
     public void saveProfile(User actor, Profile profile) {
@@ -93,6 +95,8 @@ public class UserService {
         validateProfile(profile);
         profileDAO.upsert(profile);
         actionLogService.write(String.valueOf(actor.getUserId()), null, "UPDATE_PROFILE");
+        auditLogService.write(String.valueOf(actor.getUserId()), "USER_OPERATION", "INFO",
+            "更新用户档案", "SAVE_PROFILE");
     }
 
     public Profile getProfile(Long userId) {

@@ -1,6 +1,7 @@
 package com.ticket.dto;
 
 public class ConnectionPoolStatusDTO {
+    private String role;
     private String poolName;
     private int maximumPoolSize;
     private int minimumIdle;
@@ -12,6 +13,14 @@ public class ConnectionPoolStatusDTO {
     private long idleTimeoutMs;
     private long maxLifetimeMs;
     private long leakDetectionThresholdMs;
+
+    public String getRole() {
+        return role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
+    }
 
     public String getPoolName() {
         return poolName;

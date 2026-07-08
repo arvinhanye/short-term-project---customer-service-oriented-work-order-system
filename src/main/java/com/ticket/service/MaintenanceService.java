@@ -18,7 +18,7 @@ public class MaintenanceService {
             throw new BusinessException("批处理截止时间不合法");
         }
         BusinessService.validateStatusTransition(oldStatus, newStatus);
-        try (Connection connection = MySQLDBUtil.getDataSource().getConnection();
+        try (Connection connection = MySQLDBUtil.getWriteConnection();
              CallableStatement statement = connection.prepareCall("{call sp_batch_update_order_status(?, ?, ?)}")) {
             statement.setInt(1, oldStatus);
             statement.setInt(2, newStatus);

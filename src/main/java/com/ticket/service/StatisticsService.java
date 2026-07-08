@@ -27,7 +27,7 @@ public class StatisticsService {
             throw new BusinessException("报表年月不合法");
         }
         List<ReportDTO> report = new ArrayList<>();
-        try (Connection connection = MySQLDBUtil.getDataSource().getConnection();
+        try (Connection connection = MySQLDBUtil.getReadConnection();
              CallableStatement statement = connection.prepareCall("{call sp_monthly_report(?, ?)}")) {
             statement.setInt(1, year);
             statement.setInt(2, month);
