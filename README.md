@@ -34,21 +34,21 @@ ticket-management/
 
 ## 课程交付物
 
-- [需求规格说明书（含用例图）](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/requirements.md)
-- [数据库设计文档（含 MySQL E-R 图与 MongoDB 集合结构）](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/database-design.md)
-- [Day02 交付记录：数据库实现、工程搭建与 DAO 基础](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day02-delivery.md)
-- [Day03 交付记录：核心业务模块与 MongoDB DAO](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day03-delivery.md)
-- [Day04 交付记录：行为日志模块与聚合统计](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day04-delivery.md)
-- [Day05 交付记录：推荐功能与跨数据库联查](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day05-delivery.md)
-- [Day06 交付记录：数据统计与报表模块](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day06-delivery.md)
-- [Day07 交付记录：性能优化、安全加固与系统集成](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-delivery.md)
-- [Day07 性能优化报告](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-performance-report.md)
-- [Day07 安全检查清单](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day07-security-checklist.md)
-- [Day08 交付记录：单元测试补充、压力测试与代码重构](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day08-delivery.md)
-- [Day08 压力测试报告](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day08-stress-test-report.md)
-- [技术设计文档](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/technical-design.md)
-- [用户手册](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/user-manual.md)
-- [Day09 交付记录：技术设计文档与用户手册](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/docs/day09-delivery.md)
+- [需求规格说明书（含用例图）](docs/requirements.md)
+- [数据库设计文档（含 MySQL E-R 图与 MongoDB 集合结构）](docs/database-design.md)
+- [Day02 交付记录：数据库实现、工程搭建与 DAO 基础](docs/day02-delivery.md)
+- [Day03 交付记录：核心业务模块与 MongoDB DAO](docs/day03-delivery.md)
+- [Day04 交付记录：行为日志模块与聚合统计](docs/day04-delivery.md)
+- [Day05 交付记录：推荐功能与跨数据库联查](docs/day05-delivery.md)
+- [Day06 交付记录：数据统计与报表模块](docs/day06-delivery.md)
+- [Day07 交付记录：性能优化、安全加固与系统集成](docs/day07-delivery.md)
+- [Day07 性能优化报告](docs/day07-performance-report.md)
+- [Day07 安全检查清单](docs/day07-security-checklist.md)
+- [Day08 交付记录：单元测试补充、压力测试与代码重构](docs/day08-delivery.md)
+- [Day08 压力测试报告](docs/day08-stress-test-report.md)
+- [技术设计文档](docs/technical-design.md)
+- [用户手册](docs/user-manual.md)
+- [Day09 交付记录：技术设计文档与用户手册](docs/day09-delivery.md)
 - 代码仓库远程：`origin` 指向 Gitee，`github` 指向 GitHub
 
 ## 环境要求
@@ -73,7 +73,7 @@ ticket-management/
 
 ## 配置说明
 
-数据库连接配置位于 [db.properties](/Users/arvinhan/Desktop/2026暑假短学期/ticket-management/src/main/resources/db.properties)：
+数据库连接配置位于 [db.properties](src/main/resources/db.properties)：
 
 - `mysql.url`
 - `mysql.username`
