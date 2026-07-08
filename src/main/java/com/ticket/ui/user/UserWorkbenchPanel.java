@@ -4,14 +4,17 @@ import com.ticket.dto.PageResult;
 import com.ticket.model.Order;
 import com.ticket.model.Profile;
 import com.ticket.model.User;
+import com.ticket.dto.RecommendationDTO;
 import com.ticket.service.BusinessService;
 import com.ticket.service.RecommendService;
 import com.ticket.service.UserService;
 import com.ticket.ui.MainFrame;
 import com.ticket.ui.table.OrderTableModel;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.math.BigDecimal;
+import java.util.List;
 import javax.swing.JButton;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -51,7 +54,7 @@ public class UserWorkbenchPanel extends JPanel {
         topBar.add(headerLabel);
         topBar.add(refreshButton);
         topBar.add(logoutButton);
-        add(topBar, BorderLayout.NORTH);
+        add(scrollableHeader(topBar), BorderLayout.NORTH);
 
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("我的工单", new JScrollPane(table));
@@ -85,7 +88,7 @@ public class UserWorkbenchPanel extends JPanel {
         form.add(priorityField);
         form.add(createButton);
         form.add(recommendButton);
-        panel.add(form, BorderLayout.NORTH);
+        panel.add(scrollableHeader(form), BorderLayout.NORTH);
         panel.add(new JScrollPane(descriptionArea), BorderLayout.CENTER);
 
         createButton.addActionListener(event -> {
@@ -107,8 +110,7 @@ public class UserWorkbenchPanel extends JPanel {
 
         recommendButton.addActionListener(event -> {
             var recommendations = recommendService.recommendTickets(currentUser, 5);
-            JOptionPane.showMessageDialog(this, recommendations.isEmpty() ? "暂无推荐" :
-                "推荐工单：\n" + recommendations);
+            showRecommendations(recommendations);
         });
         return panel;
     }
@@ -124,10 +126,54 @@ public class UserWorkbenchPanel extends JPanel {
         form.add(new JLabel("地址"));
         form.add(addressField);
         form.add(saveButton);
-        panel.add(form, BorderLayout.NORTH);
+        panel.add(scrollableHeader(form), BorderLayout.NORTH);
         panel.add(new JScrollPane(notesArea), BorderLayout.CENTER);
         saveButton.addActionListener(event -> saveProfile());
         return panel;
+    }
+
+    private JScrollPane scrollableHeader(JPanel panel) {
+        JScrollPane scrollPane = new JScrollPane(panel);
+        scrollPane.setBorder(null);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        scrollPane.setPreferredSize(new Dimension(0, panel.getPreferredSize().height + 18));
+        return scrollPane;
+    }
+
+    private void showRecommendations(List<RecommendationDTO> recommendations) {
+        JTextArea textArea = new JTextArea(formatRecommendations(recommendations), 12, 52);
+        textArea.setEditable(false);
+        textArea.setLineWrap(true);
+        textArea.setWrapStyleWord(true);
+        textArea.setCaretPosition(0);
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        scrollPane.setPreferredSize(new Dimension(520, 280));
+        JOptionPane.showMessageDialog(this, scrollPane, "推荐分类", JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private String formatRecommendations(List<RecommendationDTO> recommendations) {
+        if (recommendations.isEmpty()) {
+            return "暂无推荐";
+        }
+        StringBuilder builder = new StringBuilder("推荐工单：\n");
+        for (int index = 0; index < recommendations.size(); index++) {
+            RecommendationDTO recommendation = recommendations.get(index);
+            builder.append(index + 1)
+                .append(". ")
+                .append(recommendation.getTitle())
+                .append("\n   分类：")
+                .append(recommendation.getCategoryName())
+                .append("（ID ")
+                .append(recommendation.getCategoryId())
+                .append("）")
+                .append("\n   推荐理由：")
+                .append(recommendation.getReason())
+                .append("\n   评分：")
+                .append(recommendation.getScore())
+                .append("\n\n");
+        }
+        return builder.toString().trim();
     }
 
     private void loadOrders() {

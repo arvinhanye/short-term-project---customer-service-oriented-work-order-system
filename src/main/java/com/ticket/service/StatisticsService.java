@@ -10,6 +10,8 @@ import com.ticket.util.MySQLDBUtil;
 import java.sql.CallableStatement;
 import java.sql.Connection;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import org.bson.Document;
@@ -36,7 +38,7 @@ public class StatisticsService {
                     report.add(new ReportDTO("processing_count", resultSet.getLong("processing_count"), null));
                     report.add(new ReportDTO("completed_count", resultSet.getLong("completed_count"), null));
                     report.add(new ReportDTO("closed_count", resultSet.getLong("closed_count"), null));
-                    report.add(new ReportDTO("cancelled_count", resultSet.getLong("cancelled_count"), null));
+                    report.add(new ReportDTO("cancelled_count", getOptionalLong(resultSet, "cancelled_count"), null));
                     report.add(new ReportDTO("avg_amount", 0L, resultSet.getBigDecimal("avg_amount")));
                 }
             }
@@ -44,6 +46,16 @@ public class StatisticsService {
         } catch (Exception ex) {
             throw new BusinessException("调用月度报表存储过程失败", ex);
         }
+    }
+
+    private long getOptionalLong(ResultSet resultSet, String columnName) throws SQLException {
+        ResultSetMetaData metaData = resultSet.getMetaData();
+        for (int index = 1; index <= metaData.getColumnCount(); index++) {
+            if (columnName.equalsIgnoreCase(metaData.getColumnLabel(index))) {
+                return resultSet.getLong(columnName);
+            }
+        }
+        return 0L;
     }
 
     public List<Document> hotItems(User actor) {

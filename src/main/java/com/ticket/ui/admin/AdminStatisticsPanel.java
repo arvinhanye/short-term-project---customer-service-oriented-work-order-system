@@ -4,6 +4,7 @@ import com.ticket.dto.ReportDTO;
 import com.ticket.model.User;
 import com.ticket.service.StatisticsService;
 import java.awt.BorderLayout;
+import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
 import java.math.BigDecimal;
@@ -18,6 +19,7 @@ import java.util.Set;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JSpinner;
@@ -61,7 +63,7 @@ public class AdminStatisticsPanel extends JPanel {
         tabs.addTab("系统日志审计", buildAuditPanel());
         add(tabs, BorderLayout.CENTER);
         loadMonthlyReport();
-        loadDocumentTable(aggregateModel, statisticsService.actionTypeSummary(currentUser), "行为类型分布");
+        loadAggregateTable(() -> statisticsService.actionTypeSummary(currentUser), "行为类型分布");
         loadAuditLogs();
     }
 
@@ -74,7 +76,7 @@ public class AdminStatisticsPanel extends JPanel {
         toolbar.add(new JLabel("月份"));
         toolbar.add(monthSpinner);
         toolbar.add(refreshButton);
-        panel.add(toolbar, BorderLayout.NORTH);
+        panel.add(scrollableHeader(toolbar), BorderLayout.NORTH);
         panel.add(new JScrollPane(new JTable(monthlyModel)), BorderLayout.CENTER);
         refreshButton.addActionListener(event -> loadMonthlyReport());
         return panel;
@@ -92,7 +94,7 @@ public class AdminStatisticsPanel extends JPanel {
         addAggregateButton(buttonPanel, "评论标签", () -> statisticsService.commentTagSummary(currentUser));
         addAggregateButton(buttonPanel, "工单评论", () -> statisticsService.itemCommentStats(currentUser));
         addAggregateButton(buttonPanel, "最近行为", () -> statisticsService.recentActionLogs(currentUser, 50));
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, buttonPanel, new JScrollPane(new JTable(aggregateModel)));
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, new JScrollPane(buttonPanel), new JScrollPane(new JTable(aggregateModel)));
         splitPane.setResizeWeight(0.16);
         panel.add(splitPane, BorderLayout.CENTER);
         panel.add(aggregateStatusLabel, BorderLayout.SOUTH);
@@ -122,48 +124,85 @@ public class AdminStatisticsPanel extends JPanel {
         toolbar.add(levelButton);
         toolbar.add(userButton);
         toolbar.add(trendButton);
-        panel.add(toolbar, BorderLayout.NORTH);
+        panel.add(scrollableHeader(toolbar), BorderLayout.NORTH);
         panel.add(new JScrollPane(new JTable(auditModel)), BorderLayout.CENTER);
         panel.add(auditStatusLabel, BorderLayout.SOUTH);
         searchButton.addActionListener(event -> loadAuditLogs());
-        typeButton.addActionListener(event -> loadAuditTable(statisticsService.systemLogSummary(currentUser), "系统日志类型汇总"));
-        levelButton.addActionListener(event -> loadAuditTable(statisticsService.systemLogLevelSummary(currentUser), "系统日志级别汇总"));
-        userButton.addActionListener(event -> loadAuditTable(statisticsService.systemLogUserSummary(currentUser, limitValue()), "系统日志用户汇总"));
-        trendButton.addActionListener(event -> loadAuditTable(statisticsService.systemLogDailyTrend(currentUser, 30), "系统日志近 30 天趋势"));
+        typeButton.addActionListener(event -> loadAuditTable(() -> statisticsService.systemLogSummary(currentUser), "系统日志类型汇总"));
+        levelButton.addActionListener(event -> loadAuditTable(() -> statisticsService.systemLogLevelSummary(currentUser), "系统日志级别汇总"));
+        userButton.addActionListener(event -> loadAuditTable(() -> statisticsService.systemLogUserSummary(currentUser, limitValue()), "系统日志用户汇总"));
+        trendButton.addActionListener(event -> loadAuditTable(() -> statisticsService.systemLogDailyTrend(currentUser, 30), "系统日志近 30 天趋势"));
         return panel;
     }
 
     private void addAggregateButton(JPanel buttonPanel, String title, DocumentSupplier supplier) {
         JButton button = new JButton(title);
-        button.addActionListener(event -> loadDocumentTable(aggregateModel, supplier.get(), title));
+        button.addActionListener(event -> loadAggregateTable(supplier, title));
         buttonPanel.add(button);
     }
 
+    private JScrollPane scrollableHeader(JPanel panel) {
+        JScrollPane scrollPane = new JScrollPane(panel);
+        scrollPane.setBorder(null);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        scrollPane.setPreferredSize(new Dimension(0, panel.getPreferredSize().height + 18));
+        return scrollPane;
+    }
+
+    private void loadAggregateTable(DocumentSupplier supplier, String title) {
+        try {
+            loadDocumentTable(aggregateModel, supplier.get(), title);
+        } catch (Exception ex) {
+            showLoadError(title, ex);
+        }
+    }
+
     private void loadMonthlyReport() {
-        monthlyModel.setRowCount(0);
-        int year = (Integer) yearSpinner.getValue();
-        int month = (Integer) monthSpinner.getValue();
-        List<ReportDTO> report = statisticsService.monthlyReport(currentUser, year, month);
-        for (ReportDTO row : report) {
-            monthlyModel.addRow(new Object[]{monthlyLabel(row.getLabel()), row.getCount(), formatAmount(row.getAmount())});
+        try {
+            monthlyModel.setRowCount(0);
+            int year = (Integer) yearSpinner.getValue();
+            int month = (Integer) monthSpinner.getValue();
+            List<ReportDTO> report = statisticsService.monthlyReport(currentUser, year, month);
+            for (ReportDTO row : report) {
+                monthlyModel.addRow(new Object[]{monthlyLabel(row.getLabel()), row.getCount(), formatAmount(row.getAmount())});
+            }
+        } catch (Exception ex) {
+            showLoadError("月度报表", ex);
         }
     }
 
     private void loadAuditLogs() {
-        List<Document> logs = statisticsService.auditLogs(
-            currentUser,
-            selectedText(typeBox),
-            selectedText(levelBox),
-            userIdField.getText(),
-            keywordField.getText(),
-            limitValue()
-        );
-        loadAuditTable(logs, "系统日志查询结果");
+        try {
+            List<Document> logs = statisticsService.auditLogs(
+                currentUser,
+                selectedText(typeBox),
+                selectedText(levelBox),
+                userIdField.getText(),
+                keywordField.getText(),
+                limitValue()
+            );
+            loadAuditTable(logs, "系统日志查询结果");
+        } catch (Exception ex) {
+            showLoadError("系统日志查询结果", ex);
+        }
     }
 
     private void loadAuditTable(List<Document> rows, String title) {
-        loadDocumentTable(auditModel, rows, title);
-        auditStatusLabel.setText(title + "，共 " + rows.size() + " 条");
+        try {
+            loadDocumentTable(auditModel, rows, title);
+            auditStatusLabel.setText(title + "，共 " + rows.size() + " 条");
+        } catch (Exception ex) {
+            showLoadError(title, ex);
+        }
+    }
+
+    private void loadAuditTable(DocumentSupplier supplier, String title) {
+        try {
+            loadAuditTable(supplier.get(), title);
+        } catch (Exception ex) {
+            showLoadError(title, ex);
+        }
     }
 
     private void loadDocumentTable(DefaultTableModel model, List<Document> rows, String title) {
@@ -238,6 +277,21 @@ public class AdminStatisticsPanel extends JPanel {
     private String selectedText(JComboBox<String> box) {
         Object value = box.getSelectedItem();
         return value == null ? "" : value.toString();
+    }
+
+    private void showLoadError(String title, Exception ex) {
+        String message = title + "加载失败：" + rootMessage(ex);
+        aggregateStatusLabel.setText(message);
+        auditStatusLabel.setText(message);
+        JOptionPane.showMessageDialog(this, message, "提示", JOptionPane.WARNING_MESSAGE);
+    }
+
+    private String rootMessage(Throwable throwable) {
+        Throwable current = throwable;
+        while (current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 
     @FunctionalInterface

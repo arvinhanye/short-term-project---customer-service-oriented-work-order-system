@@ -48,7 +48,7 @@ public class AdminWorkbenchPanel extends JPanel {
         topBar.add(healthButton);
         topBar.add(batchButton);
         topBar.add(logoutButton);
-        add(topBar, BorderLayout.NORTH);
+        add(scrollableHeader(topBar), BorderLayout.NORTH);
 
         JTable leftTable = new JTable(leftTableModel);
         leftTableModel.addRow(new Object[]{"全部工单", "三栏式客服工作台入口"});
@@ -68,6 +68,15 @@ public class AdminWorkbenchPanel extends JPanel {
         healthButton.addActionListener(event -> runHealthCheck());
         batchButton.addActionListener(event -> batchCancelStalePendingOrders());
         logoutButton.addActionListener(event -> mainFrame.logout());
+    }
+
+    private JScrollPane scrollableHeader(JPanel panel) {
+        JScrollPane scrollPane = new JScrollPane(panel);
+        scrollPane.setBorder(null);
+        scrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
+        scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_NEVER);
+        scrollPane.setPreferredSize(new Dimension(0, panel.getPreferredSize().height + 18));
+        return scrollPane;
     }
 
     public void bindUser(User user) {
