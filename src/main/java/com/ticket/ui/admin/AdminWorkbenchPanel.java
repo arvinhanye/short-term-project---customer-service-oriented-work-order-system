@@ -57,6 +57,7 @@ public class AdminWorkbenchPanel extends JPanel {
     private final DefaultTableModel leftTableModel = new DefaultTableModel(new Object[]{"模块", "说明"}, 0);
     private final JTextArea centerArea = new JTextArea();
     private final JTextArea rightArea = new JTextArea();
+    private final JLabel workbenchStatusLabel = new JLabel("请选择左侧模块开始处理");
     private User currentUser;
 
     public AdminWorkbenchPanel(MainFrame mainFrame) {
@@ -80,13 +81,15 @@ public class AdminWorkbenchPanel extends JPanel {
 
         JTable leftTable = new JTable(leftTableModel);
         leftTable.setDefaultEditor(Object.class, null);
+        leftTable.setRowHeight(34);
+        leftTable.setAutoResizeMode(JTable.AUTO_RESIZE_LAST_COLUMN);
         configureReadOnlyArea(centerArea);
         configureReadOnlyArea(rightArea);
-        leftTableModel.addRow(new Object[]{"全部工单", "三栏式客服工作台入口"});
-        leftTableModel.addRow(new Object[]{"分类管理", "维护一级/二级分类"});
-        leftTableModel.addRow(new Object[]{"行为日志", "查看行为聚合、评论统计和评分分布"});
-        leftTableModel.addRow(new Object[]{"系统日志", "查看审计与异常日志"});
-        leftTableModel.addRow(new Object[]{"连接池监控", "查看 HikariCP 实时连接池状态"});
+        leftTableModel.addRow(new Object[]{"全部工单", "查询、查看详情、回复、备注、状态流转、分配客服"});
+        leftTableModel.addRow(new Object[]{"分类管理", "新增、修改、删除一级/二级分类"});
+        leftTableModel.addRow(new Object[]{"行为日志", "查看行为聚合、评论统计、评分分布"});
+        leftTableModel.addRow(new Object[]{"系统日志", "查看登录、工单处理、批处理、异常审计"});
+        leftTableModel.addRow(new Object[]{"连接池监控", "查看 READ/WRITE 连接池实时状态"});
         leftTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         leftTable.addMouseListener(new MouseAdapter() {
             @Override
@@ -105,6 +108,8 @@ public class AdminWorkbenchPanel extends JPanel {
         splitPane.setResizeWeight(0.28);
         splitPane.setPreferredSize(new Dimension(1200, 700));
         add(splitPane, BorderLayout.CENTER);
+        workbenchStatusLabel.setBorder(javax.swing.BorderFactory.createEmptyBorder(6, 10, 6, 10));
+        add(workbenchStatusLabel, BorderLayout.SOUTH);
 
         statsButton.addActionListener(event -> loadStats());
         usersButton.addActionListener(event -> loadUsers());
@@ -115,6 +120,7 @@ public class AdminWorkbenchPanel extends JPanel {
     }
 
     private void handleModuleClick(String moduleName) {
+        workbenchStatusLabel.setText("正在打开：" + moduleName);
         switch (moduleName) {
             case "全部工单" -> showTicketManager();
             case "分类管理" -> showCategoryManager();
@@ -221,6 +227,7 @@ public class AdminWorkbenchPanel extends JPanel {
             }
             detailArea.setText("已加载 " + tickets.size() + " 条工单。选中一行后点击上方按钮处理，双击行可查看详情。");
             centerArea.setText("工单管理：已加载 " + tickets.size() + " 条记录。");
+            workbenchStatusLabel.setText("工单管理已加载：选中工单后可回复、备注、流转状态或分配客服。");
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "加载工单失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
@@ -238,6 +245,7 @@ public class AdminWorkbenchPanel extends JPanel {
             rightArea.setText("当前工单：" + freshTicket.getItem().getTitle()
                 + "\n状态：" + (freshTicket.getOrder() == null ? "" : statusText(freshTicket.getOrder().getStatus()))
                 + "\n评论数：" + freshTicket.getCommentCount());
+            workbenchStatusLabel.setText("已打开工单 " + freshTicket.getItem().getItemId() + " 的详情。");
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "加载详情失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
@@ -438,6 +446,7 @@ public class AdminWorkbenchPanel extends JPanel {
                 });
             }
             centerArea.setText("分类管理：已加载 " + model.getRowCount() + " 个分类。");
+            workbenchStatusLabel.setText("分类管理已加载：填写名称和父分类ID后可新增或修改分类。");
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "加载分类失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
@@ -529,8 +538,39 @@ public class AdminWorkbenchPanel extends JPanel {
     public void bindUser(User user) {
         this.currentUser = user;
         headerLabel.setText("ADMIN：" + user.getUsername());
-        centerArea.setText("左侧为查询与列表，中间用于详情与回复记录，右侧用于客户资料、分类、优先级、状态操作。");
-        rightArea.setText("这里将承载用户档案、分配客服、状态流转与内部备注。");
+        showAdminHome();
+    }
+
+    private void showAdminHome() {
+        centerArea.setText("""
+            管理员工作台
+
+            你可以从左侧模块进入具体功能：
+
+            1. 全部工单
+               打开工单管理窗口，支持按标题和状态查询。
+               选中工单后可查看详情、客服回复、添加内部备注、状态流转、分配客服。
+
+            2. 分类管理
+               维护工单分类。新增二级分类时填写父分类ID；一级分类的父分类ID留空。
+
+            3. 行为日志 / 系统日志
+               查看用户行为、评分、评论、审计日志和异常记录。
+
+            4. 连接池监控
+               查看 READ/WRITE 两个 HikariCP 连接池状态，并可模拟连接占用。
+            """);
+        rightArea.setText("""
+            当前处理建议
+
+            - 新工单：进入“全部工单”，筛选“待处理”，查看详情后回复或流转为处理中。
+            - 处理中：补充客服回复或内部备注，完成后流转为已完成。
+            - 分类维护：先确认分类下没有子分类或工单，再执行删除。
+            - 审计检查：处理关键操作后，可到“系统日志”查看操作记录。
+
+            快捷入口也在顶部按钮区保留：统计、用户管理、自检、连接池监控、批量取消超时。
+            """);
+        workbenchStatusLabel.setText("已进入管理员首页：点击左侧模块可以打开对应管理窗口。");
     }
 
     private void loadStats() {
@@ -551,6 +591,7 @@ public class AdminWorkbenchPanel extends JPanel {
             var users = userService.listUsers(currentUser);
             centerArea.setText("用户列表：\n" + users.stream().map(User::getUsername).toList());
             rightArea.setText("当前共 " + users.size() + " 个用户");
+            workbenchStatusLabel.setText("用户管理已加载：当前共 " + users.size() + " 个用户。");
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
@@ -561,6 +602,7 @@ public class AdminWorkbenchPanel extends JPanel {
             var result = systemHealthService.runFullCheck(currentUser);
             centerArea.setText("系统自检结果：\n" + result);
             rightArea.setText(result.isHealthy() ? "系统状态：稳定" : "系统状态：存在异常，请查看失败项");
+            workbenchStatusLabel.setText(result.isHealthy() ? "系统自检通过。" : "系统自检发现异常，请查看失败项。");
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
@@ -625,6 +667,7 @@ public class AdminWorkbenchPanel extends JPanel {
             statusLabel.setText("状态：" + summary);
             centerArea.setText("连接池读写分离状态：\n" + summary);
             rightArea.setText("SELECT 默认走 READ 池，写入、更新和事务默认走 WRITE 池。");
+            workbenchStatusLabel.setText("连接池监控已刷新：" + summary);
         } catch (Exception ex) {
             statusLabel.setText("刷新失败：" + ex.getMessage());
         }
@@ -703,6 +746,7 @@ public class AdminWorkbenchPanel extends JPanel {
         try {
             int affectedRows = maintenanceService.batchUpdateOrderStatus(currentUser, 0, 4, LocalDateTime.now().minusDays(30));
             rightArea.setText("批量取消完成，影响 " + affectedRows + " 条工单。");
+            workbenchStatusLabel.setText("批量取消超时工单完成，影响 " + affectedRows + " 条。");
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
