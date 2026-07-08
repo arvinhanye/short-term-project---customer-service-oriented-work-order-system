@@ -54,7 +54,7 @@ flowchart TB
 | `LoginPanel` | 登录入口，调用 `UserService.login` |
 | `RegisterDialog` | 注册弹窗，调用 `UserService.register` |
 | `UserWorkbenchPanel` | 普通用户工作台，提供我的工单、创建工单、个人资料维护 |
-| `AdminWorkbenchPanel` | 管理员工作台，提供统计、用户管理、系统自检和批量取消超时工单入口 |
+| `AdminWorkbenchPanel` | 管理员工作台，提供统计、用户管理、系统自检、连接池监控和批量取消超时工单入口 |
 | `AdminStatisticsPanel` | 管理员统计窗口，展示月度报表、MongoDB 聚合统计和系统日志审计 |
 | `OrderTableModel` | 工单列表表格模型 |
 
@@ -69,6 +69,7 @@ flowchart TB
 | `CrossDatabaseQueryService` | MySQL 与 MongoDB 跨库查询组合 |
 | `MaintenanceService` | 批量状态维护，调用存储过程完成超时工单处理 |
 | `SystemHealthService` | MySQL、MongoDB、DAO 查询链路自检 |
+| `ConnectionPoolMonitorService` | 读取 HikariCP 连接池实时状态并提供管理员监控入口 |
 | `ActionLogService` | 统一写入行为日志 |
 | `AuditLogService` | 统一写入系统审计日志 |
 
@@ -214,13 +215,15 @@ MongoDB 数据库名默认为 `ticket_management_logs`。
 
 | 场景 | 优化 |
 | --- | --- |
-| MySQL 连接 | HikariCP 连接池复用连接 |
+| MySQL 连接 | HikariCP 连接池复用连接，管理员端可查看连接池实时状态 |
 | 普通用户工单分页 | `orders(user_id, created_at)`、`orders(user_id, status, created_at)` |
 | 管理员工单分页 | `orders(status, created_at)` |
 | 分类最近工单 | `items(category_id, created_at)` |
 | 标题检索 | `items.title` 全文索引 |
 | MongoDB 行为查询 | `user_id`、`item_id`、`action_type`、`created_at` 及组合索引 |
 | MongoDB 审计查询 | `log_type`、`log_level`、`user_id`、`timestamp` 及组合索引 |
+
+管理员工作台提供“连接池监控”入口，展示 HikariCP 的池名称、最大连接数、最小空闲连接、正在使用连接、空闲连接、总连接数、等待连接线程、使用率和超时配置。该面板每 0.8 秒自动刷新，并提供“模拟占用连接”按钮，课堂展示时可临时借出 3 条连接保持 8 秒，直观看到正在使用连接数和使用率上升。该面板用于运行期观察 MySQL 连接池是否拥塞，支撑连接池监控加分项。
 
 ## 9. 测试设计
 

@@ -1,8 +1,10 @@
 package com.ticket.util;
 
 import com.ticket.config.DBConfig;
+import com.ticket.dto.ConnectionPoolStatusDTO;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
+import com.zaxxer.hikari.HikariPoolMXBean;
 import javax.sql.DataSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,6 +33,26 @@ public final class MySQLDBUtil {
             LOGGER.info("Initialized HikariCP datasource");
         }
         return dataSource;
+    }
+
+    public static synchronized ConnectionPoolStatusDTO getPoolStatus() {
+        HikariDataSource hikariDataSource = (HikariDataSource) getDataSource();
+        HikariPoolMXBean poolBean = hikariDataSource.getHikariPoolMXBean();
+        ConnectionPoolStatusDTO status = new ConnectionPoolStatusDTO();
+        status.setPoolName(hikariDataSource.getPoolName());
+        status.setMaximumPoolSize(hikariDataSource.getMaximumPoolSize());
+        status.setMinimumIdle(hikariDataSource.getMinimumIdle());
+        status.setConnectionTimeoutMs(hikariDataSource.getConnectionTimeout());
+        status.setIdleTimeoutMs(hikariDataSource.getIdleTimeout());
+        status.setMaxLifetimeMs(hikariDataSource.getMaxLifetime());
+        status.setLeakDetectionThresholdMs(hikariDataSource.getLeakDetectionThreshold());
+        if (poolBean != null) {
+            status.setActiveConnections(poolBean.getActiveConnections());
+            status.setIdleConnections(poolBean.getIdleConnections());
+            status.setTotalConnections(poolBean.getTotalConnections());
+            status.setThreadsAwaitingConnection(poolBean.getThreadsAwaitingConnection());
+        }
+        return status;
     }
 
     public static synchronized void close() {
