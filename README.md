@@ -104,6 +104,13 @@ java -jar target/ticket-management.jar
 
 主类为 `com.ticket.Main`。
 
+桌面启动脚本：
+
+- macOS：双击 `启动工单系统.command`
+- Windows：双击 `start-ticket-management.bat`
+
+两个启动脚本都会先用 Maven 打包最新代码，再启动 `target/ticket-management.jar`。Windows 运行前请确认 JDK 17+、Maven 3.8+ 已加入 `PATH`，并已启动 MySQL 与 MongoDB。
+
 初始化数据中的示例账号默认密码均为 `Ticket@123`。可使用 `admin01` 登录管理员工作台，或使用 `user01` 登录普通用户工作台；`user06` 为禁用账号，可用于验证账号状态控制。
 
 Day08 压力测试需显式开启：

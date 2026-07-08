@@ -32,11 +32,18 @@ import javax.swing.table.DefaultTableModel;
 import org.bson.Document;
 
 public class AdminStatisticsPanel extends JPanel {
+    public enum ViewMode {
+        FULL,
+        BEHAVIOR,
+        SYSTEM
+    }
+
     private static final DecimalFormat MONEY_FORMAT = new DecimalFormat("0.00");
     private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
     private final StatisticsService statisticsService;
     private final User currentUser;
+    private final ViewMode viewMode;
     private final DefaultTableModel monthlyModel = new DefaultTableModel(new Object[]{"指标", "数量", "金额"}, 0);
     private final DefaultTableModel aggregateModel = new DefaultTableModel();
     private final DefaultTableModel auditModel = new DefaultTableModel();
@@ -51,19 +58,48 @@ public class AdminStatisticsPanel extends JPanel {
     private final JSpinner auditLimitSpinner = new JSpinner(new SpinnerNumberModel(30, 1, 200, 5));
 
     public AdminStatisticsPanel(StatisticsService statisticsService, User currentUser) {
+        this(statisticsService, currentUser, ViewMode.FULL);
+    }
+
+    public AdminStatisticsPanel(StatisticsService statisticsService, User currentUser, ViewMode viewMode) {
         this.statisticsService = statisticsService;
         this.currentUser = currentUser;
+        this.viewMode = viewMode == null ? ViewMode.FULL : viewMode;
         LocalDate now = LocalDate.now();
         this.yearSpinner = new JSpinner(new SpinnerNumberModel(now.getYear(), 2000, 2100, 1));
         this.monthSpinner = new JSpinner(new SpinnerNumberModel(now.getMonthValue(), 1, 12, 1));
         setLayout(new BorderLayout());
+        add(buildContent(), BorderLayout.CENTER);
+        loadInitialData();
+    }
+
+    private JPanel buildContent() {
+        if (viewMode == ViewMode.BEHAVIOR) {
+            return buildAggregatePanel();
+        }
+        if (viewMode == ViewMode.SYSTEM) {
+            return buildAuditPanel();
+        }
         JTabbedPane tabs = new JTabbedPane();
         tabs.addTab("月度报表", buildMonthlyPanel());
-        tabs.addTab("MongoDB 聚合统计", buildAggregatePanel());
+        tabs.addTab("行为日志统计", buildAggregatePanel());
         tabs.addTab("系统日志审计", buildAuditPanel());
-        add(tabs, BorderLayout.CENTER);
-        loadMonthlyReport();
-        loadAggregateTable(() -> statisticsService.actionTypeSummary(currentUser), "行为类型分布");
+        JPanel panel = new JPanel(new BorderLayout());
+        panel.add(tabs, BorderLayout.CENTER);
+        return panel;
+    }
+
+    private void loadInitialData() {
+        if (viewMode == ViewMode.FULL) {
+            loadMonthlyReport();
+            loadAggregateTable(() -> statisticsService.actionTypeSummary(currentUser), "行为类型分布");
+            loadAuditLogs();
+            return;
+        }
+        if (viewMode == ViewMode.BEHAVIOR) {
+            loadAggregateTable(() -> statisticsService.actionTypeSummary(currentUser), "行为类型分布");
+            return;
+        }
         loadAuditLogs();
     }
 

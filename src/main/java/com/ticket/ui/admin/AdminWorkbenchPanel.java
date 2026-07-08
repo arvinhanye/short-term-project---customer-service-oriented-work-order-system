@@ -57,7 +57,10 @@ public class AdminWorkbenchPanel extends JPanel {
     private final DefaultTableModel leftTableModel = new DefaultTableModel(new Object[]{"模块", "说明"}, 0);
     private final JTextArea centerArea = new JTextArea();
     private final JTextArea rightArea = new JTextArea();
-    private final JLabel workbenchStatusLabel = new JLabel("请选择左侧模块开始处理");
+    private final JLabel workbenchStatusLabel = new JLabel("请选择左侧模块，双击打开功能");
+    private JDialog activeModuleDialog;
+    private String activeModuleName;
+    private String selectedModuleName;
     private User currentUser;
 
     public AdminWorkbenchPanel(MainFrame mainFrame) {
@@ -91,13 +94,33 @@ public class AdminWorkbenchPanel extends JPanel {
         leftTableModel.addRow(new Object[]{"系统日志", "查看登录、工单处理、批处理、异常审计"});
         leftTableModel.addRow(new Object[]{"连接池监控", "查看 READ/WRITE 连接池实时状态"});
         leftTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        leftTable.getSelectionModel().addListSelectionListener(event -> {
+            if (!event.getValueIsAdjusting()) {
+                String moduleName = selectedModuleName(leftTable);
+                if (moduleName != null) {
+                    showModuleHint(moduleName);
+                }
+            }
+        });
         leftTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent event) {
+                int row = leftTable.rowAtPoint(event.getPoint());
+                if (row >= 0) {
+                    leftTable.setRowSelectionInterval(row, row);
+                    String moduleName = String.valueOf(leftTableModel.getValueAt(row, 0));
+                    showModuleHint(moduleName);
+                }
+            }
+
             @Override
             public void mouseClicked(MouseEvent event) {
                 int row = leftTable.rowAtPoint(event.getPoint());
                 if (row >= 0) {
-                    leftTable.setRowSelectionInterval(row, row);
-                    handleModuleClick(String.valueOf(leftTableModel.getValueAt(row, 0)));
+                    String moduleName = String.valueOf(leftTableModel.getValueAt(row, 0));
+                    if (event.getClickCount() >= 2) {
+                        handleModuleClick(moduleName);
+                    }
                 }
             }
         });
@@ -124,14 +147,164 @@ public class AdminWorkbenchPanel extends JPanel {
         switch (moduleName) {
             case "全部工单" -> showTicketManager();
             case "分类管理" -> showCategoryManager();
-            case "行为日志", "系统日志" -> loadStats();
+            case "行为日志" -> loadBehaviorLogs();
+            case "系统日志" -> loadSystemLogs();
             case "连接池监控" -> showConnectionPoolStatus();
             default -> centerArea.setText("已选择：" + moduleName);
         }
     }
 
+    private void showModuleHint(String moduleName) {
+        selectedModuleName = moduleName;
+        workbenchStatusLabel.setText("已选择：" + moduleName + "，双击打开该模块。");
+        switch (moduleName) {
+            case "全部工单" -> {
+                centerArea.setText("""
+                    全部工单
+
+                    双击打开后可进入工单管理与处理窗口。
+
+                    可执行操作：
+                    - 按标题关键词查询工单
+                    - 按状态筛选待处理、处理中、已完成、已关闭、已取消工单
+                    - 查看工单详情、客户资料、分类、优先级和历史回复
+                    - 添加客服回复或内部备注
+                    - 执行状态流转或分配客服
+                    """);
+                rightArea.setText("下一步：双击“全部工单”，在弹出的管理窗口中选中一条工单后处理。");
+            }
+            case "分类管理" -> {
+                centerArea.setText("""
+                    分类管理
+
+                    双击打开后可维护一级/二级分类。
+
+                    可执行操作：
+                    - 新增分类
+                    - 修改分类名称或父分类
+                    - 删除没有子分类且没有关联工单的分类
+
+                    父分类ID留空表示一级分类。
+                    """);
+                rightArea.setText("下一步：双击“分类管理”，填写分类名称和父分类ID后新增或修改。");
+            }
+            case "行为日志" -> {
+                centerArea.setText("""
+                    行为日志
+
+                    双击后将打开独立的行为日志窗口。
+
+                    可查看内容：
+                    - 行为类型分布
+                    - 近 30 天行为趋势
+                    - 热门工单
+                    - 用户活跃度
+                    - 客户端分布
+                    - 评分分布、评论标签、最近行为
+                    """);
+                rightArea.setText("下一步：双击“行为日志”，直接进入行为日志统计窗口。");
+            }
+            case "系统日志" -> {
+                centerArea.setText("""
+                    系统日志
+
+                    双击后将打开独立的系统日志窗口。
+
+                    可查看内容：
+                    - 审计日志查询
+                    - 系统日志类型汇总
+                    - 日志级别汇总
+                    - 用户操作汇总
+                    - 近 30 天系统日志趋势
+                    """);
+                rightArea.setText("下一步：双击“系统日志”，直接进入系统日志审计窗口。");
+            }
+            case "连接池监控" -> {
+                centerArea.setText("""
+                    连接池监控
+
+                    双击打开后可查看 READ/WRITE 两个 HikariCP 连接池的状态。
+
+                    可观察指标：
+                    - 正在使用连接
+                    - 空闲连接
+                    - 等待连接线程
+                    - 使用率
+                    - 连接超时、空闲超时、最大生命周期
+                    """);
+                rightArea.setText("下一步：双击“连接池监控”，可使用“模拟占用连接”观察写池变化。");
+            }
+            default -> {
+                centerArea.setText("已选择：" + moduleName);
+                rightArea.setText("双击左侧栏目打开对应模块。");
+            }
+        }
+    }
+
+    private String selectedModuleName(JTable leftTable) {
+        int row = leftTable.getSelectedRow();
+        if (row < 0) {
+            return null;
+        }
+        return String.valueOf(leftTableModel.getValueAt(row, 0));
+    }
+
+    private boolean isSelectedModule(String moduleName) {
+        return moduleName.equals(selectedModuleName);
+    }
+
+    private boolean focusExistingModuleDialog(String moduleName) {
+        if (activeModuleDialog == null || !activeModuleDialog.isDisplayable()) {
+            activeModuleDialog = null;
+            activeModuleName = null;
+            return false;
+        }
+        if (moduleName.equals(activeModuleName)) {
+            activeModuleDialog.toFront();
+            activeModuleDialog.requestFocus();
+            workbenchStatusLabel.setText(moduleName + "窗口已打开，已为你切换到该窗口。");
+            return true;
+        }
+        activeModuleDialog.dispose();
+        activeModuleDialog = null;
+        activeModuleName = null;
+        return false;
+    }
+
+    private void registerModuleDialog(String moduleName, JDialog dialog) {
+        activeModuleName = moduleName;
+        activeModuleDialog = dialog;
+        dialog.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowClosed(WindowEvent event) {
+                clearActiveDialog(dialog);
+            }
+
+            @Override
+            public void windowClosing(WindowEvent event) {
+                clearActiveDialog(dialog);
+            }
+        });
+    }
+
+    private void clearActiveDialog(JDialog dialog) {
+        if (activeModuleDialog == dialog) {
+            activeModuleDialog = null;
+            activeModuleName = null;
+        }
+    }
+
+    private JDialog createIndependentDialog(String title) {
+        JDialog dialog = new JDialog((java.awt.Frame) null, title, false);
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        return dialog;
+    }
+
     private void showTicketManager() {
         try {
+            if (focusExistingModuleDialog("全部工单")) {
+                return;
+            }
             DefaultTableModel model = new DefaultTableModel(
                 new Object[]{"记录编号", "工单编号", "标题", "用户", "状态", "分类", "优先级", "创建时间"}, 0);
             JTable table = new JTable(model);
@@ -168,9 +341,9 @@ public class AdminWorkbenchPanel extends JPanel {
                 new JScrollPane(table), new JScrollPane(detailArea));
             splitPane.setResizeWeight(0.62);
 
-            JDialog dialog = new JDialog(mainFrame, "工单管理与处理", false);
+            JDialog dialog = createIndependentDialog("工单管理与处理");
             dialog.setLayout(new BorderLayout());
-            dialog.add(toolbar, BorderLayout.NORTH);
+            dialog.add(scrollableHeader(toolbar), BorderLayout.NORTH);
             dialog.add(splitPane, BorderLayout.CENTER);
 
             Runnable loadTickets = () -> loadTicketRows(model, tickets, keywordField.getText(), statusFilter.getSelectedIndex(), detailArea);
@@ -191,7 +364,9 @@ public class AdminWorkbenchPanel extends JPanel {
 
             loadTickets.run();
             dialog.setSize(1180, 680);
+            dialog.setMinimumSize(new Dimension(760, 420));
             dialog.setLocationRelativeTo(this);
+            registerModuleDialog("全部工单", dialog);
             dialog.setVisible(true);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
@@ -226,8 +401,10 @@ public class AdminWorkbenchPanel extends JPanel {
                 });
             }
             detailArea.setText("已加载 " + tickets.size() + " 条工单。选中一行后点击上方按钮处理，双击行可查看详情。");
-            centerArea.setText("工单管理：已加载 " + tickets.size() + " 条记录。");
-            workbenchStatusLabel.setText("工单管理已加载：选中工单后可回复、备注、流转状态或分配客服。");
+            if (isSelectedModule("全部工单")) {
+                centerArea.setText("工单管理：已加载 " + tickets.size() + " 条记录。");
+                workbenchStatusLabel.setText("工单管理已加载：选中工单后可回复、备注、流转状态或分配客服。");
+            }
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "加载工单失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
@@ -242,10 +419,12 @@ public class AdminWorkbenchPanel extends JPanel {
             CrossTicketDTO freshTicket = crossDatabaseQueryService.getTicket(currentUser, ticket.getItem().getItemId());
             detailArea.setText(formatTicketDetail(freshTicket));
             detailArea.setCaretPosition(0);
-            rightArea.setText("当前工单：" + freshTicket.getItem().getTitle()
-                + "\n状态：" + (freshTicket.getOrder() == null ? "" : statusText(freshTicket.getOrder().getStatus()))
-                + "\n评论数：" + freshTicket.getCommentCount());
-            workbenchStatusLabel.setText("已打开工单 " + freshTicket.getItem().getItemId() + " 的详情。");
+            if (isSelectedModule("全部工单")) {
+                rightArea.setText("当前工单：" + freshTicket.getItem().getTitle()
+                    + "\n状态：" + (freshTicket.getOrder() == null ? "" : statusText(freshTicket.getOrder().getStatus()))
+                    + "\n评论数：" + freshTicket.getCommentCount());
+                workbenchStatusLabel.setText("已打开工单 " + freshTicket.getItem().getItemId() + " 的详情。");
+            }
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "加载详情失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
@@ -380,6 +559,9 @@ public class AdminWorkbenchPanel extends JPanel {
 
     private void showCategoryManager() {
         try {
+            if (focusExistingModuleDialog("分类管理")) {
+                return;
+            }
             DefaultTableModel model = new DefaultTableModel(new Object[]{"分类编号", "分类名称", "父分类编号"}, 0);
             JTable table = new JTable(model);
             table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -400,9 +582,9 @@ public class AdminWorkbenchPanel extends JPanel {
             form.add(updateButton);
             form.add(deleteButton);
 
-            JDialog dialog = new JDialog(mainFrame, "分类管理", false);
+            JDialog dialog = createIndependentDialog("分类管理");
             dialog.setLayout(new BorderLayout());
-            dialog.add(form, BorderLayout.NORTH);
+            dialog.add(scrollableHeader(form), BorderLayout.NORTH);
             dialog.add(new JScrollPane(table), BorderLayout.CENTER);
 
             Runnable refresh = () -> loadCategoryRows(model);
@@ -427,8 +609,10 @@ public class AdminWorkbenchPanel extends JPanel {
             deleteButton.addActionListener(event -> deleteSelectedCategory(table, model, refresh));
 
             refresh.run();
-            dialog.setSize(760, 520);
+            dialog.setSize(900, 560);
+            dialog.setMinimumSize(new Dimension(720, 420));
             dialog.setLocationRelativeTo(this);
+            registerModuleDialog("分类管理", dialog);
             dialog.setVisible(true);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
@@ -445,8 +629,10 @@ public class AdminWorkbenchPanel extends JPanel {
                     category.getParentId() == null ? "" : category.getParentId()
                 });
             }
-            centerArea.setText("分类管理：已加载 " + model.getRowCount() + " 个分类。");
-            workbenchStatusLabel.setText("分类管理已加载：填写名称和父分类ID后可新增或修改分类。");
+            if (isSelectedModule("分类管理")) {
+                centerArea.setText("分类管理：已加载 " + model.getRowCount() + " 个分类。");
+                workbenchStatusLabel.setText("分类管理已加载：填写名称和父分类ID后可新增或修改分类。");
+            }
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "加载分类失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
@@ -570,16 +756,33 @@ public class AdminWorkbenchPanel extends JPanel {
 
             快捷入口也在顶部按钮区保留：统计、用户管理、自检、连接池监控、批量取消超时。
             """);
-        workbenchStatusLabel.setText("已进入管理员首页：点击左侧模块可以打开对应管理窗口。");
+        workbenchStatusLabel.setText("已进入管理员首页：单击左侧模块选中，双击打开对应管理窗口。");
     }
 
     private void loadStats() {
+        showStatisticsDialog("数据统计与报表", "完整统计", AdminStatisticsPanel.ViewMode.FULL);
+    }
+
+    private void loadBehaviorLogs() {
+        showStatisticsDialog("行为日志统计", "行为日志", AdminStatisticsPanel.ViewMode.BEHAVIOR);
+    }
+
+    private void loadSystemLogs() {
+        showStatisticsDialog("系统日志审计", "系统日志", AdminStatisticsPanel.ViewMode.SYSTEM);
+    }
+
+    private void showStatisticsDialog(String title, String moduleName, AdminStatisticsPanel.ViewMode viewMode) {
         try {
-            JDialog dialog = new JDialog(mainFrame, "数据统计与报表", false);
+            if (focusExistingModuleDialog(moduleName)) {
+                return;
+            }
+            JDialog dialog = createIndependentDialog(title);
             dialog.setLayout(new BorderLayout());
-            dialog.add(new AdminStatisticsPanel(statisticsService, currentUser), BorderLayout.CENTER);
+            dialog.add(new AdminStatisticsPanel(statisticsService, currentUser, viewMode), BorderLayout.CENTER);
             dialog.setSize(1100, 720);
+            dialog.setMinimumSize(new Dimension(760, 440));
             dialog.setLocationRelativeTo(this);
+            registerModuleDialog(moduleName, dialog);
             dialog.setVisible(true);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
@@ -610,6 +813,9 @@ public class AdminWorkbenchPanel extends JPanel {
 
     private void showConnectionPoolStatus() {
         try {
+            if (focusExistingModuleDialog("连接池监控")) {
+                return;
+            }
             DefaultTableModel model = new DefaultTableModel(new Object[]{"连接角色", "指标", "当前值", "说明"}, 0);
 
             JTable table = new JTable(model);
@@ -623,9 +829,9 @@ public class AdminWorkbenchPanel extends JPanel {
             toolbar.add(simulateButton);
             toolbar.add(statusLabel);
 
-            JDialog dialog = new JDialog(mainFrame, "连接池状态监控", false);
+            JDialog dialog = createIndependentDialog("连接池状态监控");
             dialog.setLayout(new BorderLayout());
-            dialog.add(toolbar, BorderLayout.NORTH);
+            dialog.add(scrollableHeader(toolbar), BorderLayout.NORTH);
             dialog.add(new JScrollPane(table), BorderLayout.CENTER);
             connectionPoolMonitorService.recordPanelView(currentUser);
             Runnable refresh = () -> refreshConnectionPoolModel(model, statusLabel);
@@ -645,8 +851,10 @@ public class AdminWorkbenchPanel extends JPanel {
                 }
             });
             timer.start();
-            dialog.setSize(860, 460);
+            dialog.setSize(900, 560);
+            dialog.setMinimumSize(new Dimension(720, 420));
             dialog.setLocationRelativeTo(this);
+            registerModuleDialog("连接池监控", dialog);
             dialog.setVisible(true);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
@@ -665,9 +873,11 @@ public class AdminWorkbenchPanel extends JPanel {
                 .reduce((left, right) -> left + "，" + right)
                 .orElse("无连接池状态");
             statusLabel.setText("状态：" + summary);
-            centerArea.setText("连接池读写分离状态：\n" + summary);
-            rightArea.setText("SELECT 默认走 READ 池，写入、更新和事务默认走 WRITE 池。");
-            workbenchStatusLabel.setText("连接池监控已刷新：" + summary);
+            if (isSelectedModule("连接池监控")) {
+                centerArea.setText("连接池读写分离状态：\n" + summary);
+                rightArea.setText("SELECT 默认走 READ 池，写入、更新和事务默认走 WRITE 池。");
+                workbenchStatusLabel.setText("连接池监控已刷新：" + summary);
+            }
         } catch (Exception ex) {
             statusLabel.setText("刷新失败：" + ex.getMessage());
         }
