@@ -55,6 +55,20 @@ public class CrossDatabaseQueryService {
         return new PageResult<>(records, orderPage.getTotal(), orderPage.getPage(), orderPage.getPageSize());
     }
 
+    public PageResult<CrossTicketDTO> pageMyTickets(User actor, Integer status, String keyword, int page, int pageSize) {
+        UserService.requireActiveUser(actor);
+        PageResult<Order> orderPage = orderDAO.pageByUserStatusAndKeyword(
+            actor.getUserId(), status, keyword, page, pageSize);
+        List<CrossTicketDTO> records = new ArrayList<>();
+        for (Order order : orderPage.getRecords()) {
+            Item item = itemDAO.findById(order.getItemId());
+            if (item != null) {
+                records.add(buildTicket(item, order, false));
+            }
+        }
+        return new PageResult<>(records, orderPage.getTotal(), orderPage.getPage(), orderPage.getPageSize());
+    }
+
     public UserActivityDTO getUserActivity(User actor, Long userId, int limit) {
         UserService.requireActiveUser(actor);
         if (!UserService.isAdmin(actor) && !actor.getUserId().equals(userId)) {
