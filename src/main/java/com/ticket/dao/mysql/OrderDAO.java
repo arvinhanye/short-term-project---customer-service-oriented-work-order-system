@@ -84,6 +84,31 @@ public class OrderDAO extends BaseDAO {
         return new PageResult<>(orders, total, normalizedPage, normalizedPageSize);
     }
 
+    public PageResult<Order> pageByUserStatusAndKeyword(Long userId, Integer status, String keyword, int page, int pageSize) {
+        int normalizedPage = normalizePage(page);
+        int normalizedPageSize = normalizeLimit(pageSize);
+        String normalizedKeyword = keyword == null ? "" : keyword.trim();
+        boolean hasStatus = status != null;
+        boolean hasKeyword = !normalizedKeyword.isBlank();
+        String whereSql = " WHERE o.user_id = ?"
+            + (hasStatus ? " AND o.status = ?" : "")
+            + (hasKeyword ? " AND i.title LIKE ?" : "");
+
+        long total = queryOne("SELECT COUNT(*) AS cnt FROM orders o JOIN items i ON o.item_id = i.item_id" + whereSql,
+            statement -> bindUserStatusKeyword(statement, userId, status, normalizedKeyword, hasStatus, hasKeyword),
+            rs -> rs.getLong("cnt"));
+
+        List<Order> orders = query("SELECT o.* FROM orders o JOIN items i ON o.item_id = i.item_id"
+                + whereSql
+                + " ORDER BY i.updated_at DESC, o.created_at DESC LIMIT ? OFFSET ?",
+            statement -> {
+                int index = bindUserStatusKeyword(statement, userId, status, normalizedKeyword, hasStatus, hasKeyword);
+                statement.setInt(index++, normalizedPageSize);
+                statement.setInt(index, offset(normalizedPage, normalizedPageSize));
+            }, this::mapOrder);
+        return new PageResult<>(orders, total, normalizedPage, normalizedPageSize);
+    }
+
     public PageResult<Order> pageAllByStatus(Integer status, int page, int pageSize) {
         int normalizedPage = normalizePage(page);
         int normalizedPageSize = normalizeLimit(pageSize);
@@ -129,6 +154,19 @@ public class OrderDAO extends BaseDAO {
 
     private int offset(int page, int pageSize) {
         return Math.max(0, (page - 1) * pageSize);
+    }
+
+    private int bindUserStatusKeyword(PreparedStatement statement, Long userId, Integer status, String keyword,
+                                      boolean hasStatus, boolean hasKeyword) throws java.sql.SQLException {
+        int index = 1;
+        statement.setLong(index++, userId);
+        if (hasStatus) {
+            statement.setInt(index++, status);
+        }
+        if (hasKeyword) {
+            statement.setString(index++, "%" + keyword + "%");
+        }
+        return index;
     }
 
     private Order mapOrder(java.sql.ResultSet resultSet) throws java.sql.SQLException {
