@@ -11,11 +11,14 @@ class StatisticsServiceTest {
     }
 
     @Test
-    void shouldAcceptDocumentedStatusTransitions() {
+    void shouldAcceptSupportedStatusTransitions() {
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(0, 1));
+        Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(0, 2));
+        Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(0, 3));
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(0, 4));
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 2));
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 3));
+        Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 4));
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(2, 3));
     }
 

@@ -187,8 +187,8 @@ public class BusinessService {
     }
 
     public static void validateStatusTransition(int oldStatus, int newStatus) {
-        boolean valid = (oldStatus == 0 && (newStatus == 1 || newStatus == 4))
-            || (oldStatus == 1 && (newStatus == 2 || newStatus == 3))
+        boolean valid = (oldStatus == 0 && (newStatus == 1 || newStatus == 2 || newStatus == 3 || newStatus == 4))
+            || (oldStatus == 1 && (newStatus == 2 || newStatus == 3 || newStatus == 4))
             || (oldStatus == 2 && newStatus == 3);
         if (!valid) {
             throw new BusinessException("非法状态流转");
