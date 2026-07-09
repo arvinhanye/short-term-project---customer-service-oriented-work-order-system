@@ -149,6 +149,7 @@ public class BusinessService {
         if (order == null) {
             throw new BusinessException("工单记录不存在");
         }
+        requireAssignedAdminCanProcess(actor, order.getItemId());
         validateStatusTransition(order.getStatus(), newStatus);
         try (Connection connection = MySQLDBUtil.getWriteConnection()) {
             connection.setAutoCommit(false);
@@ -171,13 +172,14 @@ public class BusinessService {
     public void assignAdmin(User actor, Long itemId, Long adminId) {
         UserService.requireAdmin(actor);
         User admin = userDAO.findById(adminId);
-        if (admin == null || !"ADMIN".equals(admin.getRole())) {
-            throw new BusinessException("只能分配给 ADMIN 用户");
+        if (admin == null || !"ADMIN".equals(admin.getRole()) || admin.getStatus() == null || admin.getStatus() != 1) {
+            throw new BusinessException("只能分配给启用状态的 ADMIN 用户");
         }
         ItemDetail detail = detailDAO.findByItemId(String.valueOf(itemId));
         if (detail == null) {
             throw new BusinessException("工单详情不存在");
         }
+        requireAssignedAdminCanProcess(actor, itemId, detail);
         detail.getMetadata().setAssignedAdminId(String.valueOf(adminId));
         detail.getMetadata().setLastProcessedAt(Instant.now());
         detailDAO.upsert(detail);
@@ -210,6 +212,9 @@ public class BusinessService {
         if (adminOnlyAction && !UserService.isAdmin(actor)) {
             throw new BusinessException("需要 ADMIN 权限");
         }
+        if (adminOnlyAction) {
+            requireAssignedAdminCanProcess(actor, itemId);
+        }
         Comment comment = new Comment();
         comment.setUserId(String.valueOf(actor.getUserId()));
         comment.setItemId(String.valueOf(itemId));
@@ -239,6 +244,25 @@ public class BusinessService {
         metadata.setLastProcessedAt(Instant.now());
         detail.setMetadata(metadata);
         return detail;
+    }
+
+    private void requireAssignedAdminCanProcess(User actor, Long itemId) {
+        ItemDetail detail = detailDAO.findByItemId(String.valueOf(itemId));
+        if (detail == null) {
+            throw new BusinessException("工单详情不存在");
+        }
+        requireAssignedAdminCanProcess(actor, itemId, detail);
+    }
+
+    private void requireAssignedAdminCanProcess(User actor, Long itemId, ItemDetail detail) {
+        ItemDetail.Metadata metadata = detail.getMetadata();
+        String assignedAdminId = metadata == null ? null : metadata.getAssignedAdminId();
+        if (assignedAdminId == null || assignedAdminId.isBlank()) {
+            return;
+        }
+        if (!assignedAdminId.equals(String.valueOf(actor.getUserId()))) {
+            throw new BusinessException("工单 " + itemId + " 已分配给管理员 " + assignedAdminId + "，当前管理员只能查看，不能处理");
+        }
     }
 
     private String validatePriority(String priority) {

@@ -24,7 +24,9 @@ INSERT INTO users (user_id, username, password_hash, email, phone, role, status,
     (10007, 'user04', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user04@ticket.local', '13900000004', 'USER', 1, '2026-01-07 09:00:00', '2026-01-07 09:00:00'),
     (10008, 'user05', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user05@ticket.local', '13900000005', 'USER', 1, '2026-01-08 09:00:00', '2026-01-08 09:00:00'),
     (10009, 'user06', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user06@ticket.local', '13900000006', 'USER', 0, '2026-01-09 09:00:00', '2026-01-09 09:00:00'),
-    (10010, 'user07', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user07@ticket.local', '13900000007', 'USER', 1, '2026-01-10 09:00:00', '2026-01-10 09:00:00');
+    (10010, 'user07', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user07@ticket.local', '13900000007', 'USER', 1, '2026-01-10 09:00:00', '2026-01-10 09:00:00'),
+    (10011, 'admin04', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin04@ticket.local', '13800000004', 'ADMIN', 1, '2026-01-11 09:00:00', '2026-01-11 09:00:00'),
+    (10012, 'admin05', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin05@ticket.local', '13800000005', 'ADMIN', 1, '2026-01-12 09:00:00', '2026-01-12 09:00:00');
 
 INSERT INTO categories (category_id, name, parent_id) VALUES
     (4001, '账户问题', NULL),
@@ -48,7 +50,9 @@ INSERT INTO profiles (profile_id, user_id, real_name, id_card, address, notes) V
     (5007, 10007, '赵四', '310101199304040007', '合肥市蜀山区长江西路99号', '常见支付问题'),
     (5008, 10008, '钱五', '310101199405050008', '宁波市鄞州区天童南路199号', '需要回访'),
     (5009, 10009, '孙六', '310101199506060009', '无锡市梁溪区解放东路168号', '当前已禁用'),
-    (5010, 10010, '周七', '310101199607070010', '嘉兴市南湖区中环南路77号', '首次提交工单');
+    (5010, 10010, '周七', '310101199607070010', '嘉兴市南湖区中环南路77号', '首次提交工单'),
+    (5011, 10011, '客服专员丁', '310101198304040004', '上海市虹口区四川北路4号', '负责支付类问题'),
+    (5012, 10012, '客服专员戊', '310101198405050005', '上海市杨浦区四平路5号', '负责账号类问题');
 
 INSERT INTO items (item_id, title, category_id, status, created_at, updated_at) VALUES
     (2001, '无法登录桌面客户端', 4005, 0, '2026-02-01 10:00:00', '2026-02-01 10:00:00'),

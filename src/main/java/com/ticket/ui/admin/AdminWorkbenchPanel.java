@@ -306,8 +306,15 @@ public class AdminWorkbenchPanel extends JPanel {
             if (focusExistingModuleDialog("全部工单")) {
                 return;
             }
+            List<AdminOption> adminOptions = activeAdminOptions();
+            java.util.Map<String, String> adminNameById = adminNameById(adminOptions);
+            javax.swing.DefaultListModel<AssignmentFilter> assignmentFilterModel = buildAssignmentFilterModel(adminOptions);
+            javax.swing.JList<AssignmentFilter> assignmentFilterList = new javax.swing.JList<>(assignmentFilterModel);
+            assignmentFilterList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+            assignmentFilterList.setSelectedIndex(0);
+            assignmentFilterList.setVisibleRowCount(8);
             DefaultTableModel model = new DefaultTableModel(
-                new Object[]{"记录编号", "工单编号", "标题", "用户", "状态", "分类", "优先级", "创建时间"}, 0);
+                new Object[]{"记录编号", "工单编号", "标题", "用户", "状态", "分类", "优先级", "分配客服", "创建时间"}, 0);
             JTable table = new JTable(model);
             table.setDefaultEditor(Object.class, null);
             table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -320,27 +327,31 @@ public class AdminWorkbenchPanel extends JPanel {
             JComboBox<String> statusFilter = new JComboBox<>(new String[]{
                 "全部状态", "0 待处理", "1 处理中", "2 已完成", "3 已关闭", "4 已取消"
             });
-            JButton refreshButton = new JButton("查询/刷新");
             JButton replyButton = new JButton("客服回复");
             JButton noteButton = new JButton("内部备注");
             JButton statusButton = new JButton("状态流转");
             JButton assignButton = new JButton("分配客服");
+            setTicketActionButtonsEnabled(false, replyButton, noteButton, statusButton, assignButton);
 
             JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT));
             toolbar.add(new JLabel("标题关键词"));
             toolbar.add(keywordField);
             toolbar.add(new JLabel("状态"));
             toolbar.add(statusFilter);
-            toolbar.add(refreshButton);
             toolbar.add(replyButton);
             toolbar.add(noteButton);
             toolbar.add(statusButton);
             toolbar.add(assignButton);
 
-            JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+            JSplitPane tableSplitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
                 new JScrollPane(table), new JScrollPane(detailArea));
-            splitPane.setResizeWeight(0.62);
-            JTextArea noticeArea = createNoticeArea("查询/刷新后会在这里显示操作提示。");
+            tableSplitPane.setResizeWeight(0.62);
+            JPanel assignmentPanel = new JPanel(new BorderLayout());
+            assignmentPanel.add(new JLabel("分配分类"), BorderLayout.NORTH);
+            assignmentPanel.add(new JScrollPane(assignmentFilterList), BorderLayout.CENTER);
+            JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, assignmentPanel, tableSplitPane);
+            splitPane.setResizeWeight(0.18);
+            JTextArea noticeArea = createNoticeArea("双击左侧分配分类、标题回车或切换状态后会刷新工单。");
 
             JDialog dialog = createIndependentDialog("工单管理与处理");
             dialog.setLayout(new BorderLayout());
@@ -348,8 +359,32 @@ public class AdminWorkbenchPanel extends JPanel {
             dialog.add(splitPane, BorderLayout.CENTER);
             dialog.add(createNoticePane(noticeArea), BorderLayout.SOUTH);
 
-            Runnable loadTickets = () -> loadTicketRows(model, tickets, keywordField.getText(), statusFilter.getSelectedIndex(), detailArea, noticeArea);
-            refreshButton.addActionListener(event -> loadTickets.run());
+            Runnable loadTickets = () -> {
+                loadTicketRows(model, tickets, keywordField.getText(), statusFilter.getSelectedIndex(),
+                    selectedAssignmentFilter(assignmentFilterList), adminNameById, detailArea, noticeArea);
+                updateTicketActionButtons(table, tickets, noticeArea, replyButton, noteButton, statusButton, assignButton);
+            };
+            keywordField.addActionListener(event -> loadTickets.run());
+            statusFilter.addActionListener(event -> loadTickets.run());
+            assignmentFilterList.addListSelectionListener(event -> {
+                if (!event.getValueIsAdjusting()) {
+                    AssignmentFilter filter = selectedAssignmentFilter(assignmentFilterList);
+                    showNotice(noticeArea, "已选择分配分类：" + filter + "。双击该分类后切换查询结果。");
+                }
+            });
+            assignmentFilterList.addMouseListener(new MouseAdapter() {
+                @Override
+                public void mouseClicked(MouseEvent event) {
+                    if (event.getClickCount() >= 2 && assignmentFilterList.locationToIndex(event.getPoint()) >= 0) {
+                        loadTickets.run();
+                    }
+                }
+            });
+            table.getSelectionModel().addListSelectionListener(event -> {
+                if (!event.getValueIsAdjusting()) {
+                    updateTicketActionButtons(table, tickets, noticeArea, replyButton, noteButton, statusButton, assignButton);
+                }
+            });
             table.addMouseListener(new MouseAdapter() {
                 @Override
                 public void mouseClicked(MouseEvent event) {
@@ -375,7 +410,8 @@ public class AdminWorkbenchPanel extends JPanel {
     }
 
     private void loadTicketRows(DefaultTableModel model, List<CrossTicketDTO> tickets,
-                                String keyword, int statusIndex, JTextArea detailArea, JTextArea noticeArea) {
+                                String keyword, int statusIndex, AssignmentFilter assignmentFilter,
+                                java.util.Map<String, String> adminNameById, JTextArea detailArea, JTextArea noticeArea) {
         try {
             Integer status = statusIndex <= 0 ? null : statusIndex - 1;
             PageResult<CrossTicketDTO> result = keyword == null || keyword.isBlank()
@@ -387,9 +423,13 @@ public class AdminWorkbenchPanel extends JPanel {
                 if (status != null && (ticket.getOrder() == null || !status.equals(ticket.getOrder().getStatus()))) {
                     continue;
                 }
+                if (!matchesAssignmentFilter(ticket, assignmentFilter)) {
+                    continue;
+                }
                 tickets.add(ticket);
                 ItemDetail.Metadata metadata = ticket.getItemDetail() == null
                     ? null : ticket.getItemDetail().getMetadata();
+                String assignedAdminId = metadata == null ? null : metadata.getAssignedAdminId();
                 model.addRow(new Object[]{
                     ticket.getOrder() == null ? "" : ticket.getOrder().getOrderId(),
                     ticket.getItem() == null ? "" : ticket.getItem().getItemId(),
@@ -398,14 +438,15 @@ public class AdminWorkbenchPanel extends JPanel {
                     ticket.getOrder() == null ? "" : statusText(ticket.getOrder().getStatus()),
                     ticket.getCategory() == null ? "" : ticket.getCategory().getName(),
                     metadata == null ? "" : metadata.getPriority(),
+                    assignedAdminDisplay(assignedAdminId, adminNameById),
                     ticket.getOrder() == null ? "" : ticket.getOrder().getCreatedAt()
                 });
             }
-            detailArea.setText("已加载 " + tickets.size() + " 条工单。选中一行后点击上方按钮处理，双击行可查看详情。");
+            detailArea.setText("已加载 " + tickets.size() + " 条工单。当前分配分类：" + assignmentFilter + "。双击行可查看详情。");
             if (isSelectedModule("全部工单")) {
                 centerArea.setText("工单管理：已加载 " + tickets.size() + " 条记录。");
             }
-            showNotice(noticeArea, "工单管理已加载 " + tickets.size() + " 条记录：双击行查看详情，选中工单后可回复、备注、流转状态或分配客服。");
+            showNotice(noticeArea, "工单管理已加载 " + tickets.size() + " 条记录；分配分类：" + assignmentFilter + "。");
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(this, "加载工单失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         }
@@ -442,6 +483,9 @@ public class AdminWorkbenchPanel extends JPanel {
         if (ticket == null) {
             return;
         }
+        if (!ensureCanProcessTicket(parent, ticket, noticeArea)) {
+            return;
+        }
         Long itemId = ticket.getItem().getItemId();
         JTextArea inputArea = new JTextArea(8, 42);
         inputArea.setLineWrap(true);
@@ -472,6 +516,9 @@ public class AdminWorkbenchPanel extends JPanel {
                                     JTextArea detailArea, JTextArea noticeArea) {
         CrossTicketDTO ticket = selectedTicket(parent, table, tickets);
         if (ticket == null || ticket.getOrder() == null) {
+            return;
+        }
+        if (!ensureCanProcessTicket(parent, ticket, noticeArea)) {
             return;
         }
         Long itemId = ticket.getItem().getItemId();
@@ -505,12 +552,11 @@ public class AdminWorkbenchPanel extends JPanel {
         if (ticket == null) {
             return;
         }
+        if (!ensureCanProcessTicket(parent, ticket, noticeArea)) {
+            return;
+        }
         Long itemId = ticket.getItem().getItemId();
-        List<AdminOption> adminOptions = userService.listUsers(currentUser).stream()
-            .filter(user -> "ADMIN".equals(user.getRole()))
-            .filter(user -> user.getStatus() != null && user.getStatus() == 1)
-            .map(AdminOption::new)
-            .toList();
+        List<AdminOption> adminOptions = activeAdminOptions();
         if (adminOptions.isEmpty()) {
             JOptionPane.showMessageDialog(parent, "暂无可分配的启用 ADMIN 用户。", "提示", JOptionPane.INFORMATION_MESSAGE);
             return;
@@ -549,6 +595,108 @@ public class AdminWorkbenchPanel extends JPanel {
             return null;
         }
         return tickets.get(selectedRow);
+    }
+
+    private void updateTicketActionButtons(JTable table, List<CrossTicketDTO> tickets, JTextArea noticeArea,
+                                           JButton replyButton, JButton noteButton, JButton statusButton, JButton assignButton) {
+        int selectedRow = table.getSelectedRow();
+        if (selectedRow < 0 || selectedRow >= tickets.size()) {
+            setTicketActionButtonsEnabled(false, replyButton, noteButton, statusButton, assignButton);
+            return;
+        }
+        CrossTicketDTO ticket = tickets.get(selectedRow);
+        boolean canProcess = canCurrentAdminProcess(ticket);
+        setTicketActionButtonsEnabled(canProcess, replyButton, noteButton, statusButton, assignButton);
+        String assignedAdminId = assignedAdminId(ticket);
+        if (assignedAdminId == null || assignedAdminId.isBlank()) {
+            showNotice(noticeArea, "当前工单尚未分配客服，当前管理员可处理或分配。");
+        } else if (canProcess) {
+            showNotice(noticeArea, "当前工单已分配给你，可继续回复、备注、流转状态或重新分配。");
+        } else {
+            showNotice(noticeArea, "当前工单已分配给管理员 " + assignedAdminId + "，你可以查看，但不能处理。");
+        }
+    }
+
+    private void setTicketActionButtonsEnabled(boolean enabled, JButton... buttons) {
+        for (JButton button : buttons) {
+            button.setEnabled(enabled);
+        }
+    }
+
+    private boolean ensureCanProcessTicket(Component parent, CrossTicketDTO ticket, JTextArea noticeArea) {
+        if (canCurrentAdminProcess(ticket)) {
+            return true;
+        }
+        String message = "当前工单已分配给管理员 " + assignedAdminId(ticket) + "，你可以查看，但不能处理。";
+        showNotice(noticeArea, message);
+        JOptionPane.showMessageDialog(parent, message, "提示", JOptionPane.INFORMATION_MESSAGE);
+        return false;
+    }
+
+    private boolean canCurrentAdminProcess(CrossTicketDTO ticket) {
+        String assignedAdminId = assignedAdminId(ticket);
+        return assignedAdminId == null
+            || assignedAdminId.isBlank()
+            || (currentUser != null && assignedAdminId.equals(String.valueOf(currentUser.getUserId())));
+    }
+
+    private String assignedAdminId(CrossTicketDTO ticket) {
+        if (ticket == null || ticket.getItemDetail() == null || ticket.getItemDetail().getMetadata() == null) {
+            return null;
+        }
+        return ticket.getItemDetail().getMetadata().getAssignedAdminId();
+    }
+
+    private List<AdminOption> activeAdminOptions() {
+        return userService.listUsers(currentUser).stream()
+            .filter(user -> "ADMIN".equals(user.getRole()))
+            .filter(user -> user.getStatus() != null && user.getStatus() == 1)
+            .map(AdminOption::new)
+            .toList();
+    }
+
+    private java.util.Map<String, String> adminNameById(List<AdminOption> adminOptions) {
+        java.util.Map<String, String> result = new java.util.LinkedHashMap<>();
+        for (AdminOption option : adminOptions) {
+            result.put(String.valueOf(option.user().getUserId()), option.user().getUsername());
+        }
+        return result;
+    }
+
+    private javax.swing.DefaultListModel<AssignmentFilter> buildAssignmentFilterModel(List<AdminOption> adminOptions) {
+        javax.swing.DefaultListModel<AssignmentFilter> model = new javax.swing.DefaultListModel<>();
+        model.addElement(new AssignmentFilter(AssignmentFilterKind.ALL, null, "全部工单"));
+        model.addElement(new AssignmentFilter(AssignmentFilterKind.UNASSIGNED, null, "未分配"));
+        model.addElement(new AssignmentFilter(AssignmentFilterKind.MINE, null, "我的工单"));
+        for (AdminOption option : adminOptions) {
+            String adminId = String.valueOf(option.user().getUserId());
+            model.addElement(new AssignmentFilter(AssignmentFilterKind.ADMIN, adminId, option.toString()));
+        }
+        return model;
+    }
+
+    private AssignmentFilter selectedAssignmentFilter(javax.swing.JList<AssignmentFilter> assignmentFilterList) {
+        AssignmentFilter filter = assignmentFilterList.getSelectedValue();
+        return filter == null ? new AssignmentFilter(AssignmentFilterKind.ALL, null, "全部工单") : filter;
+    }
+
+    private boolean matchesAssignmentFilter(CrossTicketDTO ticket, AssignmentFilter filter) {
+        String assignedAdminId = assignedAdminId(ticket);
+        return switch (filter.kind()) {
+            case ALL -> true;
+            case UNASSIGNED -> assignedAdminId == null || assignedAdminId.isBlank();
+            case MINE -> currentUser != null && assignedAdminId != null
+                && assignedAdminId.equals(String.valueOf(currentUser.getUserId()));
+            case ADMIN -> filter.adminId() != null && filter.adminId().equals(assignedAdminId);
+        };
+    }
+
+    private String assignedAdminDisplay(String assignedAdminId, java.util.Map<String, String> adminNameById) {
+        if (assignedAdminId == null || assignedAdminId.isBlank()) {
+            return "未分配";
+        }
+        String adminName = adminNameById.get(assignedAdminId);
+        return adminName == null ? assignedAdminId : assignedAdminId + " - " + adminName;
     }
 
     private void refreshTicketAfterOperation(Component parent, JTable table, List<CrossTicketDTO> tickets,
@@ -1085,6 +1233,20 @@ public class AdminWorkbenchPanel extends JPanel {
         @Override
         public String toString() {
             return user.getUserId() + " - " + user.getUsername();
+        }
+    }
+
+    private enum AssignmentFilterKind {
+        ALL,
+        UNASSIGNED,
+        MINE,
+        ADMIN
+    }
+
+    private record AssignmentFilter(AssignmentFilterKind kind, String adminId, String label) {
+        @Override
+        public String toString() {
+            return label;
         }
     }
 

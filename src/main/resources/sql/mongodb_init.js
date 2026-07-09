@@ -27,10 +27,11 @@ database.system_logs.createIndex({ log_level: 1, timestamp: -1 });
 database.system_logs.createIndex({ user_id: 1, timestamp: -1 });
 
 const detailSeeds = [];
+const adminIds = ["10001", "10002", "10003", "10011", "10012"];
 for (let i = 1; i <= 20; i += 1) {
   const itemId = String(2000 + i);
   const creatorId = String(10004 + ((i - 1) % 7));
-  const assignedAdmin = String(10001 + ((i - 1) % 3));
+  const assignedAdmin = i % 6 === 0 ? null : adminIds[(i - 1) % adminIds.length];
   const priorities = ["LOW", "MEDIUM", "HIGH", "URGENT"];
   detailSeeds.push({
     item_id: itemId,
@@ -69,7 +70,7 @@ for (let i = 1; i <= 20; i += 1) {
   const itemId = String(2000 + i);
   const variant = commentTypes[(i - 1) % commentTypes.length];
   const userId = variant.tag === "AGENT_REPLY" || variant.tag === "INTERNAL_NOTE"
-    ? String(10001 + ((i - 1) % 3))
+    ? adminIds[(i - 1) % adminIds.length]
     : String(10004 + ((i - 1) % 7));
 
   database.comments.updateOne(
