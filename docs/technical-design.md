@@ -64,6 +64,7 @@ flowchart TB
 | --- | --- |
 | `UserService` | 注册、登录、账号状态校验、角色权限校验、用户资料维护 |
 | `BusinessService` | 工单创建、分页查询、详情读取、回复、评价、分配客服、状态流转 |
+| `CategoryService` | 分类读取与管理员分类维护；校验权限、父分类和层级完整性 |
 | `StatisticsService` | MySQL 月度报表、MongoDB 行为聚合、评论统计和系统日志审计 |
 | `RecommendService` | 基于历史工单的分类推荐 |
 | `CrossDatabaseQueryService` | MySQL 与 MongoDB 跨库查询组合 |
@@ -232,6 +233,7 @@ MongoDB 数据库名默认为 `ticket_management_logs`。
 | `BaseDAOTransactionTest` | 事务提交和异常回滚 |
 | `UserDAOTest` | 用户 CRUD、密码哈希、弱密码拒绝 |
 | `UserServiceSecurityTest` | 登录状态、ADMIN 权限和角色识别 |
+| `CategoryServiceTest` | 分类读取权限、父分类和层级循环、删除保护 |
 | `OrderDAOTest` | 用户分页、状态筛选和管理员分页 |
 | `ItemDAOTest` | 非法状态流转防护 |
 | `LogServiceTest` | 行为日志和审计日志对象组装 |

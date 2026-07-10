@@ -1,14 +1,13 @@
 package com.ticket.ui.admin;
 
-import com.ticket.dao.mysql.CategoryDAO;
 import com.ticket.dto.ConnectionPoolStatusDTO;
 import com.ticket.dto.CrossTicketDTO;
 import com.ticket.dto.PageResult;
-import com.ticket.model.Category;
 import com.ticket.model.Comment;
 import com.ticket.model.ItemDetail;
 import com.ticket.model.User;
 import com.ticket.service.BusinessService;
+import com.ticket.service.CategoryService;
 import com.ticket.service.ConnectionPoolMonitorService;
 import com.ticket.service.CrossDatabaseQueryService;
 import com.ticket.service.MaintenanceService;
@@ -59,7 +58,7 @@ public class AdminWorkbenchPanel extends JPanel {
     private final MaintenanceService maintenanceService = new MaintenanceService();
     private final SystemHealthService systemHealthService = new SystemHealthService();
     private final ConnectionPoolMonitorService connectionPoolMonitorService = new ConnectionPoolMonitorService();
-    private final CategoryDAO categoryDAO = new CategoryDAO();
+    private final CategoryService categoryService = new CategoryService();
     private final JLabel headerLabel = new JLabel("未登录");
     private final DefaultTableModel leftTableModel = new DefaultTableModel(new Object[]{"模块", "说明"}, 0);
     private final JTextArea centerArea = new JTextArea();
@@ -872,7 +871,7 @@ public class AdminWorkbenchPanel extends JPanel {
     private void loadCategoryRows(DefaultTableModel model, JTextArea noticeArea) {
         try {
             model.setRowCount(0);
-            for (Category category : categoryDAO.findAll()) {
+            for (var category : categoryService.listCategories(currentUser)) {
                 model.addRow(new Object[]{
                     category.getCategoryId(),
                     category.getName(),
@@ -894,14 +893,10 @@ public class AdminWorkbenchPanel extends JPanel {
             if (name == null || name.isBlank()) {
                 throw new IllegalArgumentException("分类名称不能为空");
             }
-            Category category = new Category();
-            category.setCategoryId(categoryId);
-            category.setName(name.trim());
-            category.setParentId(parseNullableLong(parentIdText));
             if (categoryId == null) {
-                categoryDAO.insert(category);
+                categoryService.createCategory(currentUser, name, parseNullableLong(parentIdText));
             } else {
-                categoryDAO.update(category);
+                categoryService.updateCategory(currentUser, categoryId, name, parseNullableLong(parentIdText));
             }
             refresh.run();
         } catch (Exception ex) {
@@ -917,14 +912,10 @@ public class AdminWorkbenchPanel extends JPanel {
         }
         Long categoryId = Long.parseLong(String.valueOf(model.getValueAt(row, 0)));
         try {
-            if (categoryDAO.countChildren(categoryId) > 0 || categoryDAO.countItems(categoryId) > 0) {
-                JOptionPane.showMessageDialog(this, "该分类仍有子分类或工单，不能删除。", "提示", JOptionPane.WARNING_MESSAGE);
-                return;
-            }
             int confirm = JOptionPane.showConfirmDialog(this, "确认删除分类 " + categoryId + "？",
                 "删除确认", JOptionPane.YES_NO_OPTION);
             if (confirm == JOptionPane.YES_OPTION) {
-                categoryDAO.delete(categoryId);
+                categoryService.deleteCategory(currentUser, categoryId);
                 refresh.run();
             }
         } catch (Exception ex) {
