@@ -1,6 +1,5 @@
 package com.ticket.ui.user;
 
-import com.ticket.dao.mysql.CategoryDAO;
 import com.ticket.dto.CrossTicketDTO;
 import com.ticket.dto.ItemDetailDTO;
 import com.ticket.dto.PageResult;
@@ -11,6 +10,7 @@ import com.ticket.model.ItemDetail;
 import com.ticket.model.Profile;
 import com.ticket.model.User;
 import com.ticket.service.BusinessService;
+import com.ticket.service.CategoryService;
 import com.ticket.service.CrossDatabaseQueryService;
 import com.ticket.service.RecommendService;
 import com.ticket.service.UserService;
@@ -32,7 +32,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import javax.swing.BorderFactory;
 import javax.swing.ButtonGroup;
 import javax.swing.JButton;
@@ -59,7 +61,8 @@ public class UserWorkbenchPanel extends JPanel {
     private final CrossDatabaseQueryService crossDatabaseQueryService = new CrossDatabaseQueryService();
     private final UserService userService = new UserService();
     private final RecommendService recommendService = new RecommendService();
-    private final CategoryDAO categoryDAO = new CategoryDAO();
+    private final CategoryService categoryService = new CategoryService();
+    private final Map<Long, String> categoryNameById = new HashMap<>();
     private final JLabel headerLabel = new JLabel("未登录");
     private final OrderTableModel tableModel = new OrderTableModel();
     private final JTable table = new JTable(tableModel);
@@ -397,18 +400,21 @@ public class UserWorkbenchPanel extends JPanel {
     }
 
     private void loadCategories() {
+        User actor = currentUser;
+        categoryBox.removeAllItems();
+        categoryNameById.clear();
         new SwingWorker<List<Category>, Void>() {
             @Override
             protected List<Category> doInBackground() {
-                return categoryDAO.findAll();
+                return categoryService.listAvailableCategories(actor);
             }
 
             @Override
             protected void done() {
                 try {
-                    categoryBox.removeAllItems();
                     for (Category category : get()) {
                         categoryBox.addItem(new CategoryOption(category.getCategoryId(), category.getName()));
+                        categoryNameById.put(category.getCategoryId(), category.getName());
                     }
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(UserWorkbenchPanel.this, "加载分类失败", "提示", JOptionPane.WARNING_MESSAGE);
@@ -779,12 +785,7 @@ public class UserWorkbenchPanel extends JPanel {
         if (categoryId == null) {
             return "";
         }
-        try {
-            Category category = categoryDAO.findById(categoryId);
-            return category == null ? String.valueOf(categoryId) : category.getName();
-        } catch (Exception ex) {
-            return String.valueOf(categoryId);
-        }
+        return categoryNameById.getOrDefault(categoryId, String.valueOf(categoryId));
     }
 
     private String formatBeijingTime(Instant instant) {
