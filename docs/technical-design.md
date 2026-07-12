@@ -208,7 +208,7 @@ MongoDB 数据库名默认为 `ticket_management_logs`。
 
 ## 7. 异常与一致性设计
 
-系统定义 `BusinessException` 表示可提示给用户的业务错误，`DBException` 表示数据库访问错误。创建工单涉及 MySQL 和 MongoDB 两类数据源，采用“MySQL 事务 + MongoDB 补偿删除”的方式降低跨库不一致风险。批量状态维护通过 MySQL 存储过程执行，并记录系统审计日志。
+系统定义 `BusinessException` 表示可提示给用户的业务错误，`DBException` 表示数据库访问错误。创建工单涉及 MySQL 和 MongoDB 两类数据源，采用“MySQL 事务 + MongoDB 补偿删除”的方式降低跨库不一致风险；若补偿删除暂时失败，会写入 MySQL `cross_db_repair_records`，下次启动时重试。MongoDB 行为日志或系统日志写入失败时，日志会写入 MySQL `pending_mongo_writes`，下次启动时重放到 MongoDB。批量状态维护通过 MySQL 存储过程执行，并记录系统审计日志。
 
 系统补充 `SystemLogImportDAO.batchInsert` 作为 JDBC 批处理示例入口，面向系统日志归档或测试日志导入场景，将多条 `SystemLog` 写入 MySQL `system_log_import_records`。该方法在单个 JDBC 事务中复用 `PreparedStatement`，逐条绑定参数后调用 `addBatch()`，最后通过 `executeBatch()` 批量提交，满足“日志数据导入使用 JDBC 批处理”的技术要求。
 

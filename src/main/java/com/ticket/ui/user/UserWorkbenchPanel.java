@@ -3,7 +3,6 @@ package com.ticket.ui.user;
 import com.ticket.dto.CrossTicketDTO;
 import com.ticket.dto.ItemDetailDTO;
 import com.ticket.dto.PageResult;
-import com.ticket.dto.RecommendationDTO;
 import com.ticket.model.Category;
 import com.ticket.model.Comment;
 import com.ticket.model.ItemDetail;
@@ -276,8 +275,21 @@ public class UserWorkbenchPanel extends JPanel {
         });
 
         recommendButton.addActionListener(event -> {
-            var recommendations = recommendService.recommendTickets(currentUser, 5);
-            showRecommendations(recommendations);
+            new SwingWorker<List<Category>, Void>() {
+                @Override
+                protected List<Category> doInBackground() {
+                    return recommendService.recommendCategories(currentUser);
+                }
+
+                @Override
+                protected void done() {
+                    try {
+                        showRecommendations(get());
+                    } catch (Exception ex) {
+                        JOptionPane.showMessageDialog(UserWorkbenchPanel.this, "加载推荐分类失败", "提示", JOptionPane.WARNING_MESSAGE);
+                    }
+                }
+            }.execute();
         });
         return panel;
     }
@@ -364,7 +376,7 @@ public class UserWorkbenchPanel extends JPanel {
         return wrapper;
     }
 
-    private void showRecommendations(List<RecommendationDTO> recommendations) {
+    private void showRecommendations(List<Category> recommendations) {
         JTextArea textArea = new JTextArea(formatRecommendations(recommendations), 12, 52);
         textArea.setEditable(false);
         textArea.setLineWrap(true);
@@ -375,25 +387,19 @@ public class UserWorkbenchPanel extends JPanel {
         JOptionPane.showMessageDialog(this, scrollPane, "推荐分类", JOptionPane.INFORMATION_MESSAGE);
     }
 
-    private String formatRecommendations(List<RecommendationDTO> recommendations) {
+    private String formatRecommendations(List<Category> recommendations) {
         if (recommendations.isEmpty()) {
             return "暂无推荐";
         }
-        StringBuilder builder = new StringBuilder("推荐工单：\n");
+        StringBuilder builder = new StringBuilder("推荐分类（按最近提交工单的分类排序）：\n");
         for (int index = 0; index < recommendations.size(); index++) {
-            RecommendationDTO recommendation = recommendations.get(index);
+            Category recommendation = recommendations.get(index);
             builder.append(index + 1)
                 .append(". ")
-                .append(recommendation.getTitle())
-                .append("\n   分类：")
-                .append(recommendation.getCategoryName())
+                .append(recommendation.getName())
                 .append("（ID ")
                 .append(recommendation.getCategoryId())
                 .append("）")
-                .append("\n   推荐理由：")
-                .append(recommendation.getReason())
-                .append("\n   评分：")
-                .append(recommendation.getScore())
                 .append("\n\n");
         }
         return builder.toString().trim();

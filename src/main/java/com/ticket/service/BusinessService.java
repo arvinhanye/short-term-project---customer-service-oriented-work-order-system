@@ -33,6 +33,7 @@ public class BusinessService {
     private final CommentDAO commentDAO = new CommentDAO();
     private final ActionLogService actionLogService = new ActionLogService();
     private final AuditLogService auditLogService = new AuditLogService();
+    private final CrossDatabaseRepairService repairService = new CrossDatabaseRepairService();
 
     public long createTicket(User actor, String title, Long categoryId, BigDecimal amount, String description, String priority) {
         UserService.requireActiveUser(actor);
@@ -82,7 +83,11 @@ public class BusinessService {
             } catch (Exception ex) {
                 connection.rollback();
                 if (itemId != null) {
-                    detailDAO.deleteByItemId(String.valueOf(itemId));
+                    try {
+                        detailDAO.deleteByItemId(String.valueOf(itemId));
+                    } catch (Exception compensationFailure) {
+                        repairService.recordDeleteItemDetailFailure(itemId, compensationFailure);
+                    }
                 }
                 auditLogService.write(String.valueOf(actor.getUserId()), "CROSS_DB_FAIL", "ERROR", "创建工单失败", "CREATE_ITEM");
                 throw ex instanceof BusinessException ? (BusinessException) ex : new BusinessException("创建工单失败", ex);

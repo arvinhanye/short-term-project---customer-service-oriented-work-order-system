@@ -50,6 +50,15 @@ public class OrderDAO extends BaseDAO {
             }, this::mapOrder);
     }
 
+    public List<Long> findRecentCategoryIdsByUser(Long userId, int limit) {
+        return query("SELECT i.category_id FROM orders o JOIN items i ON o.item_id = i.item_id "
+                + "WHERE o.user_id = ? ORDER BY o.created_at DESC, o.order_id DESC LIMIT ?",
+            statement -> {
+                statement.setLong(1, userId);
+                statement.setInt(2, normalizeLimit(limit));
+            }, resultSet -> resultSet.getLong("category_id"));
+    }
+
     public List<Order> findRecent(int limit) {
         return query("SELECT * FROM orders ORDER BY created_at DESC LIMIT ?",
             statement -> statement.setInt(1, normalizeLimit(limit)), this::mapOrder);

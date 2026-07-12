@@ -70,6 +70,8 @@ ticket-management/
 5. `src/main/resources/sql/mysql_init_data.sql`
 6. `src/main/resources/sql/mongodb_init.js`
 
+已按旧版本初始化的数据库，应额外执行 `src/main/resources/sql/mysql_p0_reliability.sql`，以创建 MongoDB 日志重试队列与跨库补偿修复记录表。
+
 如果数据库已经按旧版本初始化，可额外执行 `src/main/resources/sql/mysql_day07_optimization.sql` 补充 Day07 性能索引。
 
 ## 配置说明

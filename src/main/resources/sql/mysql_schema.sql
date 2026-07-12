@@ -10,6 +10,8 @@ DROP VIEW IF EXISTS v_business_summary;
 DROP VIEW IF EXISTS v_user_detail;
 
 DROP TABLE IF EXISTS system_log_import_records;
+DROP TABLE IF EXISTS cross_db_repair_records;
+DROP TABLE IF EXISTS pending_mongo_writes;
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS items;
 DROP TABLE IF EXISTS profiles;
@@ -106,4 +108,38 @@ CREATE TABLE system_log_import_records (
     INDEX idx_log_import_user_created_at (user_id, created_at),
     INDEX idx_log_import_type_created_at (log_type, created_at),
     INDEX idx_log_import_level_created_at (log_level, created_at)
+);
+
+-- MongoDB 暂时不可用时，保留待投递日志，确保业务操作日志最终可补写到 MongoDB。
+CREATE TABLE pending_mongo_writes (
+    retry_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    write_type ENUM('ACTION', 'SYSTEM') NOT NULL,
+    user_id VARCHAR(64),
+    item_id VARCHAR(64),
+    log_type VARCHAR(64) NOT NULL,
+    log_level VARCHAR(20),
+    message TEXT,
+    operation VARCHAR(200),
+    client_type VARCHAR(50),
+    ip VARCHAR(64),
+    occurred_at DATETIME NOT NULL,
+    status ENUM('PENDING', 'DONE') NOT NULL DEFAULT 'PENDING',
+    attempt_count INT NOT NULL DEFAULT 0,
+    last_error VARCHAR(500),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_pending_mongo_status_created_at (status, created_at)
+);
+
+-- 跨库补偿删除失败时的持久化修复队列。
+CREATE TABLE cross_db_repair_records (
+    repair_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    repair_type ENUM('DELETE_ITEM_DETAIL') NOT NULL,
+    item_id BIGINT NOT NULL,
+    status ENUM('PENDING', 'DONE') NOT NULL DEFAULT 'PENDING',
+    attempt_count INT NOT NULL DEFAULT 0,
+    last_error VARCHAR(500),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_cross_db_repair_status_created_at (status, created_at)
 );

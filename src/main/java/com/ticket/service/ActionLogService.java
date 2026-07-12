@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 public class ActionLogService {
     private static final Logger LOGGER = LoggerFactory.getLogger(ActionLogService.class);
     private final LogDAO logDAO;
+    private final MongoLogRetryService retryService;
 
     public ActionLogService() {
         this(new LogDAO());
@@ -16,8 +17,10 @@ public class ActionLogService {
 
     public ActionLogService(LogDAO logDAO) {
         this.logDAO = logDAO;
+        this.retryService = new MongoLogRetryService();
     }
 
+    /** MongoDB 不可用时，日志会转入 MySQL 持久化重试队列。 */
     public void write(String userId, String itemId, String actionType) {
         ActionLog log = new ActionLog();
         log.setUserId(userId);
@@ -33,7 +36,7 @@ public class ActionLogService {
         try {
             logDAO.insert(log);
         } catch (Exception ex) {
-            LOGGER.error("Failed to persist action log to MongoDB, actionType={}", actionType, ex);
+            retryService.recordActionFailure(log, ex);
         }
     }
 }

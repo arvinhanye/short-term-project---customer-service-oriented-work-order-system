@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 public class AuditLogService {
     private static final Logger LOGGER = LoggerFactory.getLogger(AuditLogService.class);
     private final SystemLogDAO systemLogDAO;
+    private final MongoLogRetryService retryService;
 
     public AuditLogService() {
         this(new SystemLogDAO());
@@ -16,8 +17,10 @@ public class AuditLogService {
 
     public AuditLogService(SystemLogDAO systemLogDAO) {
         this.systemLogDAO = systemLogDAO;
+        this.retryService = new MongoLogRetryService();
     }
 
+    /** MongoDB 不可用时，日志会转入 MySQL 持久化重试队列。 */
     public void write(String userId, String logType, String level, String message, String operation) {
         SystemLog log = new SystemLog();
         log.setUserId(userId);
@@ -34,7 +37,7 @@ public class AuditLogService {
         try {
             systemLogDAO.insert(log);
         } catch (Exception ex) {
-            LOGGER.error("Failed to persist audit log to MongoDB, operation={}", operation, ex);
+            retryService.recordSystemFailure(log, ex);
         }
     }
 }
