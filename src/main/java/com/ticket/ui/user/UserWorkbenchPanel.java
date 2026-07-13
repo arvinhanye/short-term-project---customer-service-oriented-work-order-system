@@ -1,6 +1,7 @@
 package com.ticket.ui.user;
 
 import com.ticket.dto.CrossTicketDTO;
+import com.ticket.dto.CursorPageResult;
 import com.ticket.dto.ItemDetailDTO;
 import com.ticket.dto.PageResult;
 import com.ticket.model.Category;
@@ -29,6 +30,7 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
@@ -89,6 +91,7 @@ public class UserWorkbenchPanel extends JPanel {
     private int currentPage = 1;
     private final int pageSize = 20;
     private long currentTotal = 0;
+    private final Map<Integer, OrderCursor> pageCursors = new HashMap<>();
     private User currentUser;
 
     public UserWorkbenchPanel(MainFrame mainFrame) {
@@ -171,10 +174,28 @@ public class UserWorkbenchPanel extends JPanel {
 
     public void bindUser(User user) {
         this.currentUser = user;
+        resetPagination();
         headerLabel.setText("当前用户：" + user.getUsername());
         loadCategories();
         loadOrders();
         loadProfile();
+    }
+
+    /** 退出时清理当前用户视图，避免下一位用户看到上一会话的缓存数据。 */
+    public void clearSession() {
+        currentUser = null;
+        resetPagination();
+        currentTotal = 0;
+        tableModel.setTickets(List.of());
+        categoryBox.removeAllItems();
+        categoryNameById.clear();
+        titleField.setText("");
+        amountField.setText("");
+        descriptionArea.setText("");
+        keywordField.setText("");
+        statusFilterBox.setSelectedIndex(0);
+        headerLabel.setText("未登录");
+        updatePageControls();
     }
 
     private void initOptionModels() {
@@ -209,22 +230,24 @@ public class UserWorkbenchPanel extends JPanel {
         panel.add(scrollableHeader(filters), BorderLayout.NORTH);
         panel.add(new JScrollPane(table), BorderLayout.CENTER);
         searchButton.addActionListener(event -> {
-            currentPage = 1;
+            resetPagination();
             loadOrders();
         });
         resetButton.addActionListener(event -> {
             statusFilterBox.setSelectedIndex(0);
             keywordField.setText("");
-            currentPage = 1;
+            resetPagination();
             loadOrders();
         });
         keywordField.addActionListener(event -> {
-            currentPage = 1;
+            resetPagination();
             loadOrders();
         });
         statusFilterBox.addActionListener(event -> {
-            currentPage = 1;
-            loadOrders();
+            if (currentUser != null) {
+                resetPagination();
+                loadOrders();
+            }
         });
         updatePageControls();
         return panel;
@@ -433,19 +456,25 @@ public class UserWorkbenchPanel extends JPanel {
         StatusOption statusOption = (StatusOption) statusFilterBox.getSelectedItem();
         Integer status = statusOption == null ? null : statusOption.status();
         String keyword = keywordField.getText();
-        new SwingWorker<PageResult<CrossTicketDTO>, Void>() {
+        OrderCursor cursor = pageCursors.get(currentPage);
+        new SwingWorker<CursorPageResult<CrossTicketDTO>, Void>() {
             @Override
-            protected PageResult<CrossTicketDTO> doInBackground() {
-                return crossDatabaseQueryService.pageMyTickets(currentUser, status, keyword, currentPage, pageSize);
+            protected CursorPageResult<CrossTicketDTO> doInBackground() {
+                return crossDatabaseQueryService.pageMyTicketsAfter(currentUser, status, keyword,
+                    cursor == null ? null : cursor.createdAt(), cursor == null ? null : cursor.orderId(), pageSize);
             }
 
             @Override
             protected void done() {
                 try {
-                    PageResult<CrossTicketDTO> result = get();
-                    currentPage = result.getPage();
+                    CursorPageResult<CrossTicketDTO> result = get();
                     currentTotal = result.getTotal();
                     tableModel.setTickets(result.getRecords());
+                    if (result.hasNext()) {
+                        pageCursors.put(currentPage + 1, new OrderCursor(result.getNextCreatedAt(), result.getNextOrderId()));
+                    } else {
+                        pageCursors.remove(currentPage + 1);
+                    }
                     updatePageControls();
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(UserWorkbenchPanel.this, "加载工单失败", "提示", JOptionPane.WARNING_MESSAGE);
@@ -458,7 +487,7 @@ public class UserWorkbenchPanel extends JPanel {
         int totalPages = totalPages();
         pageInfoLabel.setText("第 " + currentPage + " 页 / 共 " + currentTotal + " 条");
         previousPageButton.setEnabled(currentPage > 1);
-        nextPageButton.setEnabled(currentPage < totalPages);
+        nextPageButton.setEnabled(pageCursors.containsKey(currentPage + 1));
     }
 
     private int totalPages() {
@@ -466,6 +495,14 @@ public class UserWorkbenchPanel extends JPanel {
             return 1;
         }
         return (int) Math.ceil(currentTotal / (double) pageSize);
+    }
+
+    private void resetPagination() {
+        currentPage = 1;
+        pageCursors.clear();
+    }
+
+    private record OrderCursor(LocalDateTime createdAt, Long orderId) {
     }
 
     private void loadProfile() {

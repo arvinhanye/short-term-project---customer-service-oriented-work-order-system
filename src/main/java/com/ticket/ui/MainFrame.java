@@ -38,6 +38,9 @@ public class MainFrame extends JFrame {
     }
 
     public void logout() {
+        userWorkbenchPanel.clearSession();
+        adminWorkbenchPanel.clearSession();
+        loginPanel.prepareForLogin();
         cardLayout.show(rootPanel, "login");
     }
 }

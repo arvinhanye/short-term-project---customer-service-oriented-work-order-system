@@ -9,6 +9,7 @@ import com.ticket.dao.mysql.OrderDAO;
 import com.ticket.dao.mysql.ProfileDAO;
 import com.ticket.dao.mysql.UserDAO;
 import com.ticket.dto.CrossTicketDTO;
+import com.ticket.dto.CursorPageResult;
 import com.ticket.dto.PageResult;
 import com.ticket.dto.UserActivityDTO;
 import com.ticket.exception.BusinessException;
@@ -17,6 +18,9 @@ import com.ticket.model.Item;
 import com.ticket.model.Order;
 import com.ticket.model.User;
 import java.util.ArrayList;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import java.util.List;
 
 public class CrossDatabaseQueryService {
@@ -42,31 +46,22 @@ public class CrossDatabaseQueryService {
 
     public PageResult<CrossTicketDTO> pageTickets(User actor, Integer status, int page, int pageSize) {
         UserService.requireActiveUser(actor);
-        PageResult<Order> orderPage = UserService.isAdmin(actor)
-            ? orderDAO.pageAllByStatus(status, page, pageSize)
-            : orderDAO.pageByUserAndStatus(actor.getUserId(), status, page, pageSize);
-        List<CrossTicketDTO> records = new ArrayList<>();
-        for (Order order : orderPage.getRecords()) {
-            Item item = itemDAO.findById(order.getItemId());
-            if (item != null) {
-                records.add(buildTicket(item, order, UserService.isAdmin(actor)));
-            }
-        }
-        return new PageResult<>(records, orderPage.getTotal(), orderPage.getPage(), orderPage.getPageSize());
+        return pageTicketSummaries(actor, UserService.isAdmin(actor) ? null : actor.getUserId(), status, null, page, pageSize);
     }
 
     public PageResult<CrossTicketDTO> pageMyTickets(User actor, Integer status, String keyword, int page, int pageSize) {
         UserService.requireActiveUser(actor);
-        PageResult<Order> orderPage = orderDAO.pageByUserStatusAndKeyword(
-            actor.getUserId(), status, keyword, page, pageSize);
-        List<CrossTicketDTO> records = new ArrayList<>();
-        for (Order order : orderPage.getRecords()) {
-            Item item = itemDAO.findById(order.getItemId());
-            if (item != null) {
-                records.add(buildTicket(item, order, false));
-            }
-        }
-        return new PageResult<>(records, orderPage.getTotal(), orderPage.getPage(), orderPage.getPageSize());
+        return pageTicketSummaries(actor, actor.getUserId(), status, keyword, page, pageSize);
+    }
+
+    public CursorPageResult<CrossTicketDTO> pageMyTicketsAfter(User actor, Integer status, String keyword,
+                                                                 java.time.LocalDateTime cursorCreatedAt, Long cursorOrderId,
+                                                                 int pageSize) {
+        UserService.requireActiveUser(actor);
+        CursorPageResult<CrossTicketDTO> result = orderDAO.pageTicketSummariesAfter(
+            actor.getUserId(), status, keyword, cursorCreatedAt, cursorOrderId, pageSize);
+        enrichSummaryDetails(result.getRecords());
+        return result;
     }
 
     public UserActivityDTO getUserActivity(User actor, Long userId, int limit) {
@@ -98,21 +93,22 @@ public class CrossDatabaseQueryService {
 
     public PageResult<CrossTicketDTO> searchTickets(User actor, String keyword, int page, int pageSize) {
         UserService.requireActiveUser(actor);
-        PageResult<Item> itemPage = itemDAO.pageByTitle(keyword, page, pageSize);
-        List<CrossTicketDTO> records = new ArrayList<>();
-        for (Item item : itemPage.getRecords()) {
-            Order order = orderDAO.findByItemId(item.getItemId());
-            if (order == null) {
-                if (UserService.isAdmin(actor)) {
-                    records.add(buildTicket(item, null, true));
-                }
-                continue;
-            }
-            if (UserService.isAdmin(actor) || actor.getUserId().equals(order.getUserId())) {
-                records.add(buildTicket(item, order, UserService.isAdmin(actor)));
-            }
+        return pageTicketSummaries(actor, UserService.isAdmin(actor) ? null : actor.getUserId(), null, keyword, page, pageSize);
+    }
+
+    private PageResult<CrossTicketDTO> pageTicketSummaries(User actor, Long userId, Integer status, String keyword, int page, int pageSize) {
+        PageResult<CrossTicketDTO> result = orderDAO.pageTicketSummaries(userId, status, keyword, page, pageSize);
+        enrichSummaryDetails(result.getRecords());
+        return result;
+    }
+
+    private void enrichSummaryDetails(List<CrossTicketDTO> records) {
+        Set<String> itemIds = records.stream().map(dto -> String.valueOf(dto.getItem().getItemId()))
+            .collect(Collectors.toSet());
+        Map<String, com.ticket.model.ItemDetail> details = detailDAO.findByItemIds(itemIds);
+        for (CrossTicketDTO ticket : records) {
+            ticket.setItemDetail(details.get(String.valueOf(ticket.getItem().getItemId())));
         }
-        return new PageResult<>(records, itemPage.getTotal(), itemPage.getPage(), itemPage.getPageSize());
     }
 
     private CrossTicketDTO buildTicket(Item item, Order order, boolean includeInternal) {

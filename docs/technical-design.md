@@ -50,12 +50,12 @@ flowchart TB
 
 | 类 | 责任 |
 | --- | --- |
-| `MainFrame` | 应用主窗口，负责登录后切换普通用户工作台或管理员工作台 |
-| `LoginPanel` | 登录入口，调用 `UserService.login` |
+| `MainFrame` | 应用主窗口，负责登录后切换普通用户工作台或管理员工作台，并在退出时清理会话视图 |
+| `LoginPanel` | 登录入口，调用 `UserService.login`；退出后清空凭据并恢复焦点 |
 | `RegisterDialog` | 注册弹窗，调用 `UserService.register` |
-| `UserWorkbenchPanel` | 普通用户工作台，提供我的工单、创建工单、个人资料维护 |
-| `AdminWorkbenchPanel` | 管理员工作台，提供统计、用户管理、系统自检、连接池监控和批量取消超时工单入口 |
-| `AdminStatisticsPanel` | 管理员统计窗口，展示月度报表、MongoDB 聚合统计和系统日志审计 |
+| `UserWorkbenchPanel` | 普通用户工作台，提供游标分页的我的工单、创建工单、个人资料维护和会话清理 |
+| `AdminWorkbenchPanel` | 管理员工作台，提供异步加载的统计、用户管理、系统自检、连接池监控和批量取消超时工单入口 |
+| `AdminStatisticsPanel` | 管理员统计窗口，使用 `SwingWorker` 后台加载月度报表、MongoDB 聚合统计和系统日志审计 |
 | `OrderTableModel` | 工单列表表格模型 |
 
 ### 3.2 Service 层
@@ -82,6 +82,8 @@ MySQL DAO 继承 `BaseDAO`，提供通用查询、更新和事务封装；MongoD
 | --- | --- |
 | MySQL | `UserDAO`、`ProfileDAO`、`CategoryDAO`、`ItemDAO`、`OrderDAO`、`SystemLogImportDAO` |
 | MongoDB | `DetailDAO`、`CommentDAO`、`LogDAO`、`SystemLogDAO` |
+
+`OrderDAO` 提供工单摘要联表查询和游标分页查询；`DetailDAO.findByItemIds` 使用 `$in` 批量读取列表所需详情。`CrossDatabaseQueryService` 负责将两类结果按 `item_id` 合并，避免逐条查询造成 N+1 数据库访问。
 
 ### 3.4 配置层
 
@@ -218,11 +220,15 @@ MongoDB 数据库名默认为 `ticket_management_logs`。
 | --- | --- |
 | MySQL 连接 | HikariCP 连接池复用连接，管理员端可查看连接池实时状态 |
 | 普通用户工单分页 | `orders(user_id, created_at)`、`orders(user_id, status, created_at)` |
+| 普通用户翻页 | 以 `created_at` 和 `order_id` 组成稳定游标，使用“多取一条”判断是否有下一页，避免深页 `OFFSET` 扫描 |
 | 管理员工单分页 | `orders(status, created_at)` |
+| 工单列表摘要 | `orders`、`items`、`categories`、`users` 一次联表读取；MongoDB 详情按当前页批量 `$in` 查询 |
 | 分类最近工单 | `items(category_id, created_at)` |
 | 标题检索 | `items.title` 全文索引 |
 | MongoDB 行为查询 | `user_id`、`item_id`、`action_type`、`created_at` 及组合索引 |
 | MongoDB 审计查询 | `log_type`、`log_level`、`user_id`、`timestamp` 及组合索引 |
+
+行为日志、评论和系统日志的默认聚合窗口为近 30 天；排行榜、标签汇总和用户汇总默认限制为最多 20 条。管理员统计和工作台中的数据库读取均通过 `SwingWorker` 在后台执行，避免阻塞 Swing 事件分发线程。
 
 管理员工作台提供“连接池监控”入口，展示 HikariCP 的池名称、最大连接数、最小空闲连接、正在使用连接、空闲连接、总连接数、等待连接线程、使用率和超时配置。该面板每 0.8 秒自动刷新，并提供“模拟占用连接”按钮，课堂展示时可临时借出 3 条连接保持 8 秒，直观看到正在使用连接数和使用率上升。该面板用于运行期观察 MySQL 连接池是否拥塞，支撑连接池监控加分项。
 

@@ -16,6 +16,8 @@ import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
@@ -29,6 +31,7 @@ import javax.swing.JTextField;
 import javax.swing.SpinnerNumberModel;
 import javax.swing.JTabbedPane;
 import javax.swing.table.DefaultTableModel;
+import javax.swing.SwingWorker;
 import org.bson.Document;
 
 public class AdminStatisticsPanel extends JPanel {
@@ -187,41 +190,30 @@ public class AdminStatisticsPanel extends JPanel {
     }
 
     private void loadAggregateTable(DocumentSupplier supplier, String title) {
-        try {
-            loadDocumentTable(aggregateModel, supplier.get(), title);
-        } catch (Exception ex) {
-            showLoadError(title, ex);
-        }
+        aggregateStatusLabel.setText(title + "加载中…");
+        loadAsync(supplier::get, rows -> loadDocumentTable(aggregateModel, rows, title), title);
     }
 
     private void loadMonthlyReport() {
-        try {
+        int year = (Integer) yearSpinner.getValue();
+        int month = (Integer) monthSpinner.getValue();
+        loadAsync(() -> statisticsService.monthlyReport(currentUser, year, month), report -> {
             monthlyModel.setRowCount(0);
-            int year = (Integer) yearSpinner.getValue();
-            int month = (Integer) monthSpinner.getValue();
-            List<ReportDTO> report = statisticsService.monthlyReport(currentUser, year, month);
             for (ReportDTO row : report) {
                 monthlyModel.addRow(new Object[]{monthlyLabel(row.getLabel()), row.getCount(), formatAmount(row.getAmount())});
             }
-        } catch (Exception ex) {
-            showLoadError("月度报表", ex);
-        }
+        }, "月度报表");
     }
 
     private void loadAuditLogs() {
-        try {
-            List<Document> logs = statisticsService.auditLogs(
-                currentUser,
-                selectedText(typeBox),
-                selectedText(levelBox),
-                userIdField.getText(),
-                keywordField.getText(),
-                limitValue()
-            );
-            loadAuditTable(logs, "系统日志查询结果");
-        } catch (Exception ex) {
-            showLoadError("系统日志查询结果", ex);
-        }
+        String type = selectedText(typeBox);
+        String level = selectedText(levelBox);
+        String userId = userIdField.getText();
+        String keyword = keywordField.getText();
+        int limit = limitValue();
+        auditStatusLabel.setText("系统日志查询结果加载中…");
+        loadAsync(() -> statisticsService.auditLogs(currentUser, type, level, userId, keyword, limit),
+            rows -> loadAuditTable(rows, "系统日志查询结果"), "系统日志查询结果");
     }
 
     private void loadAuditTable(List<Document> rows, String title) {
@@ -234,11 +226,26 @@ public class AdminStatisticsPanel extends JPanel {
     }
 
     private void loadAuditTable(DocumentSupplier supplier, String title) {
-        try {
-            loadAuditTable(supplier.get(), title);
-        } catch (Exception ex) {
-            showLoadError(title, ex);
-        }
+        auditStatusLabel.setText(title + "加载中…");
+        loadAsync(supplier::get, rows -> loadAuditTable(rows, title), title);
+    }
+
+    private <T> void loadAsync(Supplier<T> supplier, Consumer<T> onSuccess, String title) {
+        new SwingWorker<T, Void>() {
+            @Override
+            protected T doInBackground() {
+                return supplier.get();
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    onSuccess.accept(get());
+                } catch (Exception ex) {
+                    showLoadError(title, ex);
+                }
+            }
+        }.execute();
     }
 
     private void loadDocumentTable(DefaultTableModel model, List<Document> rows, String title) {

@@ -411,11 +411,32 @@ public class AdminWorkbenchPanel extends JPanel {
     private void loadTicketRows(DefaultTableModel model, List<CrossTicketDTO> tickets,
                                 String keyword, int statusIndex, AssignmentFilter assignmentFilter,
                                 java.util.Map<String, String> adminNameById, JTextArea detailArea, JTextArea noticeArea) {
+        Integer status = statusIndex <= 0 ? null : statusIndex - 1;
+        String normalizedKeyword = keyword == null ? "" : keyword.trim();
+        detailArea.setText("工单加载中…");
+        new SwingWorker<PageResult<CrossTicketDTO>, Void>() {
+            @Override
+            protected PageResult<CrossTicketDTO> doInBackground() {
+                return normalizedKeyword.isBlank()
+                    ? crossDatabaseQueryService.pageTickets(currentUser, status, 1, 50)
+                    : crossDatabaseQueryService.searchTickets(currentUser, normalizedKeyword, 1, 50);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    renderTicketRows(get(), model, tickets, status, assignmentFilter, adminNameById, detailArea, noticeArea);
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(AdminWorkbenchPanel.this, "加载工单失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        }.execute();
+    }
+
+    private void renderTicketRows(PageResult<CrossTicketDTO> result, DefaultTableModel model, List<CrossTicketDTO> tickets,
+                                  Integer status, AssignmentFilter assignmentFilter,
+                                  java.util.Map<String, String> adminNameById, JTextArea detailArea, JTextArea noticeArea) {
         try {
-            Integer status = statusIndex <= 0 ? null : statusIndex - 1;
-            PageResult<CrossTicketDTO> result = keyword == null || keyword.isBlank()
-                ? crossDatabaseQueryService.pageTickets(currentUser, status, 1, 50)
-                : crossDatabaseQueryService.searchTickets(currentUser, keyword.trim(), 1, 50);
             tickets.clear();
             model.setRowCount(0);
             for (CrossTicketDTO ticket : result.getRecords()) {
@@ -1010,6 +1031,20 @@ public class AdminWorkbenchPanel extends JPanel {
         showAdminHome();
     }
 
+    /** 退出时关闭管理员模块窗口并清除当前会话展示。 */
+    public void clearSession() {
+        if (activeModuleDialog != null && activeModuleDialog.isDisplayable()) {
+            activeModuleDialog.dispose();
+        }
+        activeModuleDialog = null;
+        activeModuleName = null;
+        selectedModuleName = null;
+        currentUser = null;
+        headerLabel.setText("未登录");
+        centerArea.setText("");
+        rightArea.setText("");
+    }
+
     private void showAdminHome() {
         centerArea.setText("""
             管理员工作台
@@ -1072,23 +1107,45 @@ public class AdminWorkbenchPanel extends JPanel {
     }
 
     private void loadUsers() {
-        try {
-            var users = userService.listUsers(currentUser);
-            centerArea.setText("用户列表：\n" + users.stream().map(User::getUsername).toList());
-            rightArea.setText("当前共 " + users.size() + " 个用户");
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
-        }
+        centerArea.setText("用户列表加载中…");
+        new SwingWorker<List<User>, Void>() {
+            @Override
+            protected List<User> doInBackground() {
+                return userService.listUsers(currentUser);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    List<User> users = get();
+                    centerArea.setText("用户列表：\n" + users.stream().map(User::getUsername).toList());
+                    rightArea.setText("当前共 " + users.size() + " 个用户");
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(AdminWorkbenchPanel.this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void runHealthCheck() {
-        try {
-            var result = systemHealthService.runFullCheck(currentUser);
-            centerArea.setText("系统自检结果：\n" + result);
-            rightArea.setText(result.isHealthy() ? "系统状态：稳定" : "系统状态：存在异常，请查看失败项");
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
-        }
+        centerArea.setText("系统自检中…");
+        new SwingWorker<com.ticket.dto.HealthCheckDTO, Void>() {
+            @Override
+            protected com.ticket.dto.HealthCheckDTO doInBackground() {
+                return systemHealthService.runFullCheck(currentUser);
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    var result = get();
+                    centerArea.setText("系统自检结果：\n" + result);
+                    rightArea.setText(result.isHealthy() ? "系统状态：稳定" : "系统状态：存在异常，请查看失败项");
+                } catch (Exception ex) {
+                    JOptionPane.showMessageDialog(AdminWorkbenchPanel.this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void showConnectionPoolStatus() {

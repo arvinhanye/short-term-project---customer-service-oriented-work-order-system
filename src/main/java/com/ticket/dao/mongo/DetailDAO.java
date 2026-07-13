@@ -4,6 +4,10 @@ import com.ticket.dao.MongoBaseDAO;
 import com.ticket.model.ItemDetail;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import org.bson.Document;
 
 public class DetailDAO extends MongoBaseDAO {
@@ -18,6 +22,19 @@ public class DetailDAO extends MongoBaseDAO {
     public ItemDetail findByItemId(String itemId) {
         Document document = collection("item_details").find(new Document("item_id", itemId)).first();
         return document == null ? null : fromDocument(document);
+    }
+
+    public Map<String, ItemDetail> findByItemIds(Collection<String> itemIds) {
+        Map<String, ItemDetail> details = new HashMap<>();
+        if (itemIds == null || itemIds.isEmpty()) {
+            return details;
+        }
+        for (Document document : collection("item_details")
+            .find(new Document("item_id", new Document("$in", new ArrayList<>(itemIds))))) {
+            ItemDetail detail = fromDocument(document);
+            details.put(detail.getItemId(), detail);
+        }
+        return details;
     }
 
     public void deleteByItemId(String itemId) {

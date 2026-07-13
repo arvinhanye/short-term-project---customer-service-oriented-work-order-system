@@ -12,6 +12,8 @@ import java.util.List;
 import org.bson.Document;
 
 public class LogDAO extends MongoBaseDAO {
+    private static final int DEFAULT_ANALYTICS_DAYS = 30;
+    private static final int DEFAULT_TOP_N = 20;
     public void insert(ActionLog log) {
         ActionLog.ClientInfo clientInfo = log.getClientInfo() == null ? new ActionLog.ClientInfo() : log.getClientInfo();
         Instant createdAt = log.getCreatedAt() == null ? Instant.now() : log.getCreatedAt();
@@ -50,6 +52,7 @@ public class LogDAO extends MongoBaseDAO {
 
     public List<Document> aggregateUserActions() {
         return collection("action_logs").aggregate(List.of(
+            recentMatch(),
             durationProjection(),
             new Document("$group", new Document("_id", "$user_id")
                 .append("action_count", new Document("$sum", 1))
@@ -57,13 +60,15 @@ public class LogDAO extends MongoBaseDAO {
                 .append("total_duration_seconds", new Document("$sum", "$duration_value"))
                 .append("avg_duration_seconds", new Document("$avg", "$duration_value"))
                 .append("last_action_at", new Document("$max", "$created_at"))),
-            new Document("$sort", new Document("action_count", -1))
+            new Document("$sort", new Document("action_count", -1)),
+            new Document("$limit", DEFAULT_TOP_N)
         )).into(new ArrayList<>());
     }
 
     public List<Document> aggregateHotItems() {
         return collection("action_logs").aggregate(List.of(
-            new Document("$match", new Document("item_id", new Document("$nin", Arrays.asList(null, "")))),
+            new Document("$match", new Document("item_id", new Document("$nin", Arrays.asList(null, "")))
+                .append("created_at", new Document("$gte", Date.from(recentSince())))),
             new Document("$group", new Document("_id", "$item_id")
                 .append("action_count", new Document("$sum", 1))
                 .append("view_count", new Document("$sum", new Document("$cond", List.of(new Document("$eq", List.of("$action_type", "VIEW")), 1, 0))))
@@ -76,6 +81,7 @@ public class LogDAO extends MongoBaseDAO {
 
     public List<Document> aggregateActionTypeSummary() {
         return collection("action_logs").aggregate(List.of(
+            recentMatch(),
             durationProjection(),
             new Document("$group", new Document("_id", "$action_type")
                 .append("action_count", new Document("$sum", 1))
@@ -86,7 +92,8 @@ public class LogDAO extends MongoBaseDAO {
                 .append("avg_duration_seconds", 1)
                 .append("last_action_at", 1)
                 .append("unique_user_count", new Document("$size", "$user_count"))),
-            new Document("$sort", new Document("action_count", -1))
+            new Document("$sort", new Document("action_count", -1)),
+            new Document("$limit", DEFAULT_TOP_N)
         )).into(new ArrayList<>());
     }
 
@@ -103,6 +110,7 @@ public class LogDAO extends MongoBaseDAO {
 
     public List<Document> aggregateClientUsage() {
         return collection("action_logs").aggregate(List.of(
+            recentMatch(),
             new Document("$group", new Document("_id", "$client_info.client_type")
                 .append("action_count", new Document("$sum", 1))
                 .append("user_count", new Document("$addToSet", "$user_id"))
@@ -110,7 +118,8 @@ public class LogDAO extends MongoBaseDAO {
             new Document("$project", new Document("action_count", 1)
                 .append("last_action_at", 1)
                 .append("unique_user_count", new Document("$size", "$user_count"))),
-            new Document("$sort", new Document("action_count", -1))
+            new Document("$sort", new Document("action_count", -1)),
+            new Document("$limit", DEFAULT_TOP_N)
         )).into(new ArrayList<>());
     }
 
@@ -120,6 +129,14 @@ public class LogDAO extends MongoBaseDAO {
                 .append("to", "int")
                 .append("onError", 0)
                 .append("onNull", 0))));
+    }
+
+    private Document recentMatch() {
+        return new Document("$match", new Document("created_at", new Document("$gte", Date.from(recentSince()))));
+    }
+
+    private Instant recentSince() {
+        return Instant.now().minusSeconds((long) DEFAULT_ANALYTICS_DAYS * 24 * 60 * 60);
     }
 
     private Document dateToDay(String field) {

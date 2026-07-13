@@ -14,6 +14,7 @@ import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JTextField;
 import javax.swing.SwingWorker;
+import javax.swing.SwingUtilities;
 
 public class LoginPanel extends JPanel {
     private final MainFrame mainFrame;
@@ -89,5 +90,14 @@ public class LoginPanel extends JPanel {
         loginButton.setEnabled(!loading);
         registerButton.setEnabled(!loading);
         statusLabel.setText(text);
+    }
+
+    /** 清空上一次会话的凭据，供工作台退出后切换账号。 */
+    public void prepareForLogin() {
+        usernameField.setText("");
+        passwordField.setText("");
+        statusLabel.setText(" ");
+        setLoading(false, " ");
+        SwingUtilities.invokeLater(usernameField::requestFocusInWindow);
     }
 }

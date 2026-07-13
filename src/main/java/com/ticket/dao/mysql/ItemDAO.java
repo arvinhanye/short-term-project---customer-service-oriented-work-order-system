@@ -57,22 +57,55 @@ public class ItemDAO extends BaseDAO {
 
     public PageResult<Item> pageByTitle(String keyword, int page, int pageSize) {
         String normalized = keyword == null ? "" : keyword.trim();
+        if (normalized.length() >= 2) {
+            PageResult<Item> fullTextResult = pageByFullTextTitle(normalized, page, pageSize);
+            if (fullTextResult.getTotal() > 0) {
+                return fullTextResult;
+            }
+        }
+        return pageByLikeTitle(normalized, page, pageSize);
+    }
+
+    private PageResult<Item> pageByFullTextTitle(String keyword, int page, int pageSize) {
+        String booleanQuery = keyword.replaceAll("[+\\-<>()~*\\\"@]+", " ").trim();
+        if (booleanQuery.isBlank()) {
+            return new PageResult<>(List.of(), 0, page, pageSize);
+        }
+        String query = booleanQuery + "*";
+        long total = queryOne("SELECT COUNT(*) AS cnt FROM items WHERE MATCH(title) AGAINST(? IN BOOLEAN MODE)",
+            statement -> statement.setString(1, query), rs -> rs.getLong("cnt"));
+        List<Item> items = query("SELECT *, MATCH(title) AGAINST(? IN BOOLEAN MODE) AS relevance FROM items "
+                + "WHERE MATCH(title) AGAINST(? IN BOOLEAN MODE) ORDER BY relevance DESC, created_at DESC LIMIT ? OFFSET ?",
+            statement -> {
+                statement.setString(1, query);
+                statement.setString(2, query);
+                statement.setInt(3, normalizeLimit(pageSize));
+                statement.setInt(4, offset(page, pageSize));
+            }, this::mapItem);
+        return new PageResult<>(items, total, page, normalizeLimit(pageSize));
+    }
+
+    private PageResult<Item> pageByLikeTitle(String normalized, int page, int pageSize) {
         long total = queryOne("SELECT COUNT(*) AS cnt FROM items WHERE title LIKE ?",
             statement -> statement.setString(1, "%" + normalized + "%"), rs -> rs.getLong("cnt"));
         List<Item> items = query(
             "SELECT * FROM items WHERE title LIKE ? ORDER BY created_at DESC LIMIT ? OFFSET ?",
             statement -> {
                 statement.setString(1, "%" + normalized + "%");
-                statement.setInt(2, pageSize);
-                statement.setInt(3, Math.max(0, (page - 1) * pageSize));
+                statement.setInt(2, normalizeLimit(pageSize));
+                statement.setInt(3, offset(page, pageSize));
             },
             this::mapItem
         );
-        return new PageResult<>(items, total, page, pageSize);
+        return new PageResult<>(items, total, page, normalizeLimit(pageSize));
     }
 
     private int normalizeLimit(int limit) {
         return Math.max(1, Math.min(limit, 100));
+    }
+
+    private int offset(int page, int pageSize) {
+        return Math.max(0, (Math.max(1, page) - 1) * normalizeLimit(pageSize));
     }
 
     private Item mapItem(java.sql.ResultSet resultSet) throws java.sql.SQLException {
