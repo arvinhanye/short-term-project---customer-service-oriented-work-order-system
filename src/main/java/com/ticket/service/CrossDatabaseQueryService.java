@@ -49,6 +49,11 @@ public class CrossDatabaseQueryService {
         return pageTicketSummaries(actor, UserService.isAdmin(actor) ? null : actor.getUserId(), status, null, page, pageSize);
     }
 
+    public PageResult<CrossTicketDTO> pageTickets(User actor, Integer status, String keyword, int page, int pageSize) {
+        UserService.requireActiveUser(actor);
+        return pageTicketSummaries(actor, UserService.isAdmin(actor) ? null : actor.getUserId(), status, keyword, page, pageSize);
+    }
+
     public PageResult<CrossTicketDTO> pageMyTickets(User actor, Integer status, String keyword, int page, int pageSize) {
         UserService.requireActiveUser(actor);
         return pageTicketSummaries(actor, actor.getUserId(), status, keyword, page, pageSize);

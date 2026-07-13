@@ -3,13 +3,14 @@ package com.ticket.ui.admin;
 import com.ticket.dto.ReportDTO;
 import com.ticket.model.User;
 import com.ticket.service.StatisticsService;
+import com.ticket.ui.theme.AppTheme;
+import com.ticket.util.TimeFormatUtil;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.GridLayout;
 import java.math.BigDecimal;
 import java.text.DecimalFormat;
-import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Date;
@@ -42,14 +43,13 @@ public class AdminStatisticsPanel extends JPanel {
     }
 
     private static final DecimalFormat MONEY_FORMAT = new DecimalFormat("0.00");
-    private static final SimpleDateFormat DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss");
 
     private final StatisticsService statisticsService;
     private final User currentUser;
     private final ViewMode viewMode;
-    private final DefaultTableModel monthlyModel = new DefaultTableModel(new Object[]{"指标", "数量", "金额"}, 0);
-    private final DefaultTableModel aggregateModel = new DefaultTableModel();
-    private final DefaultTableModel auditModel = new DefaultTableModel();
+    private final DefaultTableModel monthlyModel = readOnlyModel(new Object[]{"指标", "数量", "金额"});
+    private final DefaultTableModel aggregateModel = readOnlyModel(new Object[]{});
+    private final DefaultTableModel auditModel = readOnlyModel(new Object[]{});
     private final JLabel aggregateStatusLabel = new JLabel("请选择左侧统计口径");
     private final JLabel auditStatusLabel = new JLabel("可按类型、级别、用户或关键词筛选系统日志");
     private final JSpinner yearSpinner;
@@ -59,6 +59,18 @@ public class AdminStatisticsPanel extends JPanel {
     private final JTextField userIdField = new JTextField(8);
     private final JTextField keywordField = new JTextField(12);
     private final JSpinner auditLimitSpinner = new JSpinner(new SpinnerNumberModel(30, 1, 200, 5));
+    private SwingWorker<?, ?> monthlyWorker;
+    private SwingWorker<?, ?> aggregateWorker;
+    private SwingWorker<?, ?> auditWorker;
+
+    private static DefaultTableModel readOnlyModel(Object[] columns) {
+        return new DefaultTableModel(columns, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+    }
 
     public AdminStatisticsPanel(StatisticsService statisticsService, User currentUser) {
         this(statisticsService, currentUser, ViewMode.FULL);
@@ -71,7 +83,12 @@ public class AdminStatisticsPanel extends JPanel {
         LocalDate now = LocalDate.now();
         this.yearSpinner = new JSpinner(new SpinnerNumberModel(now.getYear(), 2000, 2100, 1));
         this.monthSpinner = new JSpinner(new SpinnerNumberModel(now.getMonthValue(), 1, 12, 1));
+        AppTheme.styleComboBox(typeBox);
+        AppTheme.styleComboBox(levelBox);
+        AppTheme.styleInput(userIdField);
+        AppTheme.styleInput(keywordField);
         setLayout(new BorderLayout());
+        setBackground(AppTheme.PAGE);
         add(buildContent(), BorderLayout.CENTER);
         loadInitialData();
     }
@@ -108,22 +125,32 @@ public class AdminStatisticsPanel extends JPanel {
 
     private JPanel buildMonthlyPanel() {
         JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(AppTheme.PAGE);
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        toolbar.setOpaque(false);
         JButton refreshButton = new JButton("刷新");
+        AppTheme.primary(refreshButton);
         toolbar.add(new JLabel("年份"));
         toolbar.add(yearSpinner);
         toolbar.add(new JLabel("月份"));
         toolbar.add(monthSpinner);
         toolbar.add(refreshButton);
-        panel.add(scrollableHeader(toolbar), BorderLayout.NORTH);
-        panel.add(new JScrollPane(new JTable(monthlyModel)), BorderLayout.CENTER);
+        JPanel toolbarCard = AppTheme.surface(new BorderLayout());
+        toolbarCard.add(toolbar, BorderLayout.CENTER);
+        panel.add(toolbarCard, BorderLayout.NORTH);
+        JTable monthlyTable = new JTable(monthlyModel);
+        AppTheme.styleTable(monthlyTable);
+        panel.add(AppTheme.scroll(monthlyTable), BorderLayout.CENTER);
         refreshButton.addActionListener(event -> loadMonthlyReport());
         return panel;
     }
 
     private JPanel buildAggregatePanel() {
         JPanel panel = new JPanel(new BorderLayout());
-        JPanel buttonPanel = new JPanel(new GridLayout(0, 1, 4, 4));
+        panel.setBackground(AppTheme.PAGE);
+        JPanel buttonPanel = new JPanel(new GridLayout(0, 1, 6, 6));
+        buttonPanel.setBackground(AppTheme.SURFACE);
+        buttonPanel.setBorder(javax.swing.BorderFactory.createEmptyBorder(10, 10, 10, 10));
         addAggregateButton(buttonPanel, "行为类型", () -> statisticsService.actionTypeSummary(currentUser));
         addAggregateButton(buttonPanel, "近 30 天趋势", () -> statisticsService.dailyActionTrend(currentUser, 30));
         addAggregateButton(buttonPanel, "热门工单", () -> statisticsService.hotItems(currentUser));
@@ -133,21 +160,33 @@ public class AdminStatisticsPanel extends JPanel {
         addAggregateButton(buttonPanel, "评论标签", () -> statisticsService.commentTagSummary(currentUser));
         addAggregateButton(buttonPanel, "工单评论", () -> statisticsService.itemCommentStats(currentUser));
         addAggregateButton(buttonPanel, "最近行为", () -> statisticsService.recentActionLogs(currentUser, 50));
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, new JScrollPane(buttonPanel), new JScrollPane(new JTable(aggregateModel)));
-        splitPane.setResizeWeight(0.16);
+        JTable aggregateTable = new JTable(aggregateModel);
+        AppTheme.styleTable(aggregateTable);
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, AppTheme.scroll(buttonPanel), AppTheme.scroll(aggregateTable));
+        splitPane.setResizeWeight(0.19);
+        splitPane.setDividerSize(6);
         panel.add(splitPane, BorderLayout.CENTER);
+        aggregateStatusLabel.setForeground(AppTheme.MUTED);
+        aggregateStatusLabel.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 10, 8, 10));
         panel.add(aggregateStatusLabel, BorderLayout.SOUTH);
         return panel;
     }
 
     private JPanel buildAuditPanel() {
         JPanel panel = new JPanel(new BorderLayout());
+        panel.setBackground(AppTheme.PAGE);
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        toolbar.setOpaque(false);
         JButton searchButton = new JButton("查询");
         JButton typeButton = new JButton("类型汇总");
         JButton levelButton = new JButton("级别汇总");
         JButton userButton = new JButton("用户汇总");
         JButton trendButton = new JButton("近 30 天趋势");
+        AppTheme.primary(searchButton);
+        AppTheme.secondary(typeButton);
+        AppTheme.secondary(levelButton);
+        AppTheme.secondary(userButton);
+        AppTheme.secondary(trendButton);
         toolbar.add(new JLabel("类型"));
         toolbar.add(typeBox);
         toolbar.add(new JLabel("级别"));
@@ -163,10 +202,18 @@ public class AdminStatisticsPanel extends JPanel {
         toolbar.add(levelButton);
         toolbar.add(userButton);
         toolbar.add(trendButton);
-        panel.add(scrollableHeader(toolbar), BorderLayout.NORTH);
-        panel.add(new JScrollPane(new JTable(auditModel)), BorderLayout.CENTER);
+        JPanel toolbarCard = AppTheme.surface(new BorderLayout());
+        toolbarCard.add(scrollableHeader(toolbar), BorderLayout.CENTER);
+        panel.add(toolbarCard, BorderLayout.NORTH);
+        JTable auditTable = new JTable(auditModel);
+        AppTheme.styleTable(auditTable);
+        panel.add(AppTheme.scroll(auditTable), BorderLayout.CENTER);
+        auditStatusLabel.setForeground(AppTheme.MUTED);
+        auditStatusLabel.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 10, 8, 10));
         panel.add(auditStatusLabel, BorderLayout.SOUTH);
         searchButton.addActionListener(event -> loadAuditLogs());
+        userIdField.addActionListener(event -> loadAuditLogs());
+        keywordField.addActionListener(event -> loadAuditLogs());
         typeButton.addActionListener(event -> loadAuditTable(() -> statisticsService.systemLogSummary(currentUser), "系统日志类型汇总"));
         levelButton.addActionListener(event -> loadAuditTable(() -> statisticsService.systemLogLevelSummary(currentUser), "系统日志级别汇总"));
         userButton.addActionListener(event -> loadAuditTable(() -> statisticsService.systemLogUserSummary(currentUser, limitValue()), "系统日志用户汇总"));
@@ -176,6 +223,8 @@ public class AdminStatisticsPanel extends JPanel {
 
     private void addAggregateButton(JPanel buttonPanel, String title, DocumentSupplier supplier) {
         JButton button = new JButton(title);
+        AppTheme.secondary(button);
+        button.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
         button.addActionListener(event -> loadAggregateTable(supplier, title));
         buttonPanel.add(button);
     }
@@ -190,14 +239,19 @@ public class AdminStatisticsPanel extends JPanel {
     }
 
     private void loadAggregateTable(DocumentSupplier supplier, String title) {
+        cancelWorker(aggregateWorker);
         aggregateStatusLabel.setText(title + "加载中…");
-        loadAsync(supplier::get, rows -> loadDocumentTable(aggregateModel, rows, title), title);
+        aggregateWorker = loadAsync(supplier::get, rows -> {
+            loadDocumentTable(aggregateModel, rows, title);
+            aggregateStatusLabel.setText(title + "，共 " + rows.size() + " 条");
+        }, title);
     }
 
     private void loadMonthlyReport() {
+        cancelWorker(monthlyWorker);
         int year = (Integer) yearSpinner.getValue();
         int month = (Integer) monthSpinner.getValue();
-        loadAsync(() -> statisticsService.monthlyReport(currentUser, year, month), report -> {
+        monthlyWorker = loadAsync(() -> statisticsService.monthlyReport(currentUser, year, month), report -> {
             monthlyModel.setRowCount(0);
             for (ReportDTO row : report) {
                 monthlyModel.addRow(new Object[]{monthlyLabel(row.getLabel()), row.getCount(), formatAmount(row.getAmount())});
@@ -206,13 +260,14 @@ public class AdminStatisticsPanel extends JPanel {
     }
 
     private void loadAuditLogs() {
+        cancelWorker(auditWorker);
         String type = selectedText(typeBox);
         String level = selectedText(levelBox);
         String userId = userIdField.getText();
         String keyword = keywordField.getText();
         int limit = limitValue();
         auditStatusLabel.setText("系统日志查询结果加载中…");
-        loadAsync(() -> statisticsService.auditLogs(currentUser, type, level, userId, keyword, limit),
+        auditWorker = loadAsync(() -> statisticsService.auditLogs(currentUser, type, level, userId, keyword, limit),
             rows -> loadAuditTable(rows, "系统日志查询结果"), "系统日志查询结果");
     }
 
@@ -226,12 +281,13 @@ public class AdminStatisticsPanel extends JPanel {
     }
 
     private void loadAuditTable(DocumentSupplier supplier, String title) {
+        cancelWorker(auditWorker);
         auditStatusLabel.setText(title + "加载中…");
-        loadAsync(supplier::get, rows -> loadAuditTable(rows, title), title);
+        auditWorker = loadAsync(supplier::get, rows -> loadAuditTable(rows, title), title);
     }
 
-    private <T> void loadAsync(Supplier<T> supplier, Consumer<T> onSuccess, String title) {
-        new SwingWorker<T, Void>() {
+    private <T> SwingWorker<T, Void> loadAsync(Supplier<T> supplier, Consumer<T> onSuccess, String title) {
+        SwingWorker<T, Void> worker = new SwingWorker<>() {
             @Override
             protected T doInBackground() {
                 return supplier.get();
@@ -239,13 +295,24 @@ public class AdminStatisticsPanel extends JPanel {
 
             @Override
             protected void done() {
+                if (isCancelled()) {
+                    return;
+                }
                 try {
                     onSuccess.accept(get());
                 } catch (Exception ex) {
                     showLoadError(title, ex);
                 }
             }
-        }.execute();
+        };
+        worker.execute();
+        return worker;
+    }
+
+    private void cancelWorker(SwingWorker<?, ?> worker) {
+        if (worker != null && !worker.isDone()) {
+            worker.cancel(true);
+        }
     }
 
     private void loadDocumentTable(DefaultTableModel model, List<Document> rows, String title) {
@@ -268,7 +335,6 @@ public class AdminStatisticsPanel extends JPanel {
             }
             model.addRow(values.toArray());
         }
-        aggregateStatusLabel.setText(title + "，共 " + rows.size() + " 条");
     }
 
     private Document flatten(Document source) {
@@ -288,7 +354,7 @@ public class AdminStatisticsPanel extends JPanel {
 
     private Object formatValue(Object value) {
         if (value instanceof Date date) {
-            return DATE_FORMAT.format(date);
+            return TimeFormatUtil.format(date);
         }
         if (value instanceof BigDecimal amount) {
             return MONEY_FORMAT.format(amount);
