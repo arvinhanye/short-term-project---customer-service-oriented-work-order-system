@@ -13,6 +13,8 @@ import org.bson.conversions.Bson;
 import org.bson.Document;
 
 public class SystemLogDAO extends MongoBaseDAO {
+    private static final int DEFAULT_ANALYTICS_DAYS = 30;
+    private static final int DEFAULT_TOP_N = 20;
     public void insert(SystemLog log) {
         SystemLog.ActionDetail actionDetail = log.getActionDetail() == null ? new SystemLog.ActionDetail() : log.getActionDetail();
         Instant timestamp = log.getTimestamp() == null ? Instant.now() : log.getTimestamp();
@@ -61,6 +63,7 @@ public class SystemLogDAO extends MongoBaseDAO {
 
     public List<Document> aggregateByLogType() {
         return collection("system_logs").aggregate(List.of(
+            recentMatch(),
             new Document("$group", new Document("_id", "$log_type").append("count", new Document("$sum", 1))),
             new Document("$sort", new Document("count", -1))
         )).into(new ArrayList<>());
@@ -68,6 +71,7 @@ public class SystemLogDAO extends MongoBaseDAO {
 
     public List<Document> aggregateByLogLevel() {
         return collection("system_logs").aggregate(List.of(
+            recentMatch(),
             new Document("$group", new Document("_id", "$log_level")
                 .append("count", new Document("$sum", 1))
                 .append("last_seen_at", new Document("$max", "$timestamp"))),
@@ -77,13 +81,14 @@ public class SystemLogDAO extends MongoBaseDAO {
 
     public List<Document> aggregateByUser(int limit) {
         return collection("system_logs").aggregate(List.of(
+            recentMatch(),
             new Document("$group", new Document("_id", "$user_id")
                 .append("count", new Document("$sum", 1))
                 .append("levels", new Document("$addToSet", "$log_level"))
                 .append("types", new Document("$addToSet", "$log_type"))
                 .append("last_seen_at", new Document("$max", "$timestamp"))),
             new Document("$sort", new Document("count", -1).append("last_seen_at", -1)),
-            new Document("$limit", normalizeLimit(limit))
+            new Document("$limit", Math.min(DEFAULT_TOP_N, normalizeLimit(limit)))
         )).into(new ArrayList<>());
     }
 
@@ -102,6 +107,11 @@ public class SystemLogDAO extends MongoBaseDAO {
         return new Document("$dateToString", new Document("format", "%Y-%m-%d")
             .append("date", field)
             .append("timezone", "Asia/Shanghai"));
+    }
+
+    private Document recentMatch() {
+        Instant since = Instant.now().minusSeconds((long) DEFAULT_ANALYTICS_DAYS * 24 * 60 * 60);
+        return new Document("$match", new Document("timestamp", new Document("$gte", Date.from(since))));
     }
 
     private int normalizeLimit(int limit) {

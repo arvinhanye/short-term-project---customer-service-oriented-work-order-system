@@ -40,6 +40,12 @@ public class BusinessService {
         if (title == null || title.isBlank() || title.length() > 200) {
             throw new BusinessException("工单标题不合法");
         }
+        if (description == null || description.isBlank()) {
+            throw new BusinessException("问题描述不能为空");
+        }
+        if (description.length() > 4000) {
+            throw new BusinessException("工单描述过长");
+        }
         if (amount == null || amount.signum() < 0) {
             throw new BusinessException("金额不能为负数");
         }
@@ -48,9 +54,6 @@ public class BusinessService {
         }
         if (categoryId == null || categoryDAO.findById(categoryId) == null) {
             throw new BusinessException("工单分类不存在");
-        }
-        if (description != null && description.length() > 4000) {
-            throw new BusinessException("工单描述过长");
         }
         String normalizedPriority = validatePriority(priority);
         Item item = new Item();

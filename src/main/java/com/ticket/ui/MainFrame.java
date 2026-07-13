@@ -4,6 +4,8 @@ import com.ticket.model.User;
 import com.ticket.ui.admin.AdminWorkbenchPanel;
 import com.ticket.ui.user.UserWorkbenchPanel;
 import java.awt.CardLayout;
+import java.awt.Color;
+import java.awt.Dimension;
 import javax.swing.JFrame;
 import javax.swing.JPanel;
 
@@ -19,6 +21,8 @@ public class MainFrame extends JFrame {
         this.loginPanel = new LoginPanel(this);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
         setSize(1280, 800);
+        setMinimumSize(new Dimension(1040, 680));
+        getContentPane().setBackground(new Color(246, 248, 252));
         setLocationRelativeTo(null);
         rootPanel.add(loginPanel, "login");
         rootPanel.add(userWorkbenchPanel, "user");
@@ -38,6 +42,9 @@ public class MainFrame extends JFrame {
     }
 
     public void logout() {
+        userWorkbenchPanel.clearSession();
+        adminWorkbenchPanel.clearSession();
+        loginPanel.prepareForLogin();
         cardLayout.show(rootPanel, "login");
     }
 }

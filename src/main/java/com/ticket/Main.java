@@ -1,6 +1,7 @@
 package com.ticket;
 
 import com.ticket.ui.MainFrame;
+import com.ticket.ui.theme.AppTheme;
 import com.ticket.service.CrossDatabaseRepairService;
 import com.ticket.service.MongoLogRetryService;
 import com.ticket.util.MongoDBUtil;
@@ -38,6 +39,7 @@ public class Main {
         }
 
         SwingUtilities.invokeLater(() -> {
+            AppTheme.install();
             MainFrame mainFrame = new MainFrame();
             mainFrame.setVisible(true);
         });

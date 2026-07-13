@@ -2,6 +2,7 @@ package com.ticket.ui.table;
 
 import com.ticket.dto.CrossTicketDTO;
 import com.ticket.model.ItemDetail;
+import com.ticket.util.TimeFormatUtil;
 import java.util.ArrayList;
 import java.util.List;
 import javax.swing.table.AbstractTableModel;
@@ -42,8 +43,8 @@ public class OrderTableModel extends AbstractTableModel {
             case 3 -> priorityText(ticket);
             case 4 -> ticket.getOrder() == null ? "" : statusText(ticket.getOrder().getStatus());
             case 5 -> ticket.getOrder() == null ? "" : ticket.getOrder().getAmount();
-            case 6 -> ticket.getOrder() == null ? "" : ticket.getOrder().getCreatedAt();
-            case 7 -> ticket.getItem() == null ? "" : ticket.getItem().getUpdatedAt();
+            case 6 -> ticket.getOrder() == null ? "—" : TimeFormatUtil.format(ticket.getOrder().getCreatedAt());
+            case 7 -> ticket.getItem() == null ? "—" : TimeFormatUtil.format(ticket.getItem().getUpdatedAt());
             default -> "";
         };
     }

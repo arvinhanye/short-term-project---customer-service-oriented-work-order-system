@@ -11,6 +11,8 @@ import java.util.List;
 import org.bson.Document;
 
 public class CommentDAO extends MongoBaseDAO {
+    private static final int DEFAULT_ANALYTICS_DAYS = 30;
+    private static final int DEFAULT_TOP_N = 20;
     public void insert(Comment comment) {
         collection("comments").insertOne(toDocument(comment));
     }
@@ -54,18 +56,21 @@ public class CommentDAO extends MongoBaseDAO {
 
     public List<Document> aggregateAverageRatingByItem() {
         return collection("comments").aggregate(List.of(
-            new Document("$match", new Document("tags", "CUSTOMER_RATING")),
+            new Document("$match", new Document("tags", "CUSTOMER_RATING")
+                .append("created_at", new Document("$gte", Date.from(recentSince())))),
             ratingProjection(),
             new Document("$group", new Document("_id", "$item_id")
                 .append("avg_rating", new Document("$avg", "$rating_value"))
                 .append("rating_count", new Document("$sum", 1))
                 .append("last_rating_at", new Document("$max", "$created_at"))),
-            new Document("$sort", new Document("avg_rating", -1).append("rating_count", -1))
+            new Document("$sort", new Document("avg_rating", -1).append("rating_count", -1)),
+            new Document("$limit", DEFAULT_TOP_N)
         )).into(new ArrayList<>());
     }
 
     public List<Document> aggregateTagSummary() {
         return collection("comments").aggregate(List.of(
+            recentMatch(),
             new Document("$unwind", "$tags"),
             new Document("$group", new Document("_id", "$tags")
                 .append("comment_count", new Document("$sum", 1))
@@ -74,13 +79,15 @@ public class CommentDAO extends MongoBaseDAO {
             new Document("$project", new Document("comment_count", 1)
                 .append("last_comment_at", 1)
                 .append("unique_user_count", new Document("$size", "$user_count"))),
-            new Document("$sort", new Document("comment_count", -1))
+            new Document("$sort", new Document("comment_count", -1)),
+            new Document("$limit", DEFAULT_TOP_N)
         )).into(new ArrayList<>());
     }
 
     public List<Document> aggregateRatingDistribution() {
         return collection("comments").aggregate(List.of(
-            new Document("$match", new Document("tags", "CUSTOMER_RATING")),
+            new Document("$match", new Document("tags", "CUSTOMER_RATING")
+                .append("created_at", new Document("$gte", Date.from(recentSince())))),
             ratingProjection(),
             new Document("$group", new Document("_id", "$rating_value")
                 .append("rating_count", new Document("$sum", 1))),
@@ -102,6 +109,7 @@ public class CommentDAO extends MongoBaseDAO {
 
     public List<Document> aggregateItemCommentStats() {
         return collection("comments").aggregate(List.of(
+            recentMatch(),
             new Document("$group", new Document("_id", "$item_id")
                 .append("comment_count", new Document("$sum", 1))
                 .append("internal_note_count", new Document("$sum", new Document("$cond", List.of(
@@ -142,6 +150,14 @@ public class CommentDAO extends MongoBaseDAO {
                 .append("to", "int")
                 .append("onError", 0)
                 .append("onNull", 0))));
+    }
+
+    private Document recentMatch() {
+        return new Document("$match", new Document("created_at", new Document("$gte", Date.from(recentSince()))));
+    }
+
+    private Instant recentSince() {
+        return Instant.now().minusSeconds((long) DEFAULT_ANALYTICS_DAYS * 24 * 60 * 60);
     }
 
     private Document dateToDay(String field) {

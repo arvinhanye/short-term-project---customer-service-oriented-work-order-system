@@ -50,13 +50,23 @@ flowchart TB
 
 | 类 | 责任 |
 | --- | --- |
-| `MainFrame` | 应用主窗口，负责登录后切换普通用户工作台或管理员工作台 |
-| `LoginPanel` | 登录入口，调用 `UserService.login` |
+| `MainFrame` | 应用主窗口，负责登录后切换普通用户工作台或管理员工作台，并在退出时清理会话视图 |
+| `LoginPanel` | 登录入口，调用 `UserService.login`；退出后清空凭据并恢复焦点 |
 | `RegisterDialog` | 注册弹窗，调用 `UserService.register` |
-| `UserWorkbenchPanel` | 普通用户工作台，提供我的工单、创建工单、个人资料维护 |
-| `AdminWorkbenchPanel` | 管理员工作台，提供统计、用户管理、系统自检、连接池监控和批量取消超时工单入口 |
-| `AdminStatisticsPanel` | 管理员统计窗口，展示月度报表、MongoDB 聚合统计和系统日志审计 |
+| `UserWorkbenchPanel` | 普通用户工作台，提供游标分页的我的工单、创建工单、个人资料维护和会话清理 |
+| `AdminWorkbenchPanel` | 管理员工作台，提供异步加载的统计、用户管理、系统自检、连接池监控和批量取消超时工单入口 |
+| `AdminStatisticsPanel` | 管理员统计窗口，使用 `SwingWorker` 后台加载月度报表、MongoDB 聚合统计和系统日志审计 |
 | `OrderTableModel` | 工单列表表格模型 |
+
+UI 层通过 `AppTheme` 集中维护颜色、字体、间距、按钮、表格、卡片和弹窗快捷键；`StatusTagRenderer` 负责工单状态与优先级标签。主题实现仅依赖标准 Swing，不改变 Java 17、Maven、Service、DAO 或数据库技术标准。
+
+工作台采用紧凑的页头、内容卡片、页签和分栏布局。普通用户创建工单使用“表单 + 填写提示”双栏结构；管理员端使用左侧模块导航和主从内容区。主窗口设置合理最小尺寸，表格填充可用空间，信息量不足时使用说明和空状态提示，不通过固定空白占位。
+
+为避免不同操作系统原生外观造成页签阴影、下拉框箭头异常或文字基线偏移，导航页签使用 `BasicToggleButtonUI`，下拉框使用 `BasicComboBoxUI`，表头使用垂直居中的扁平渲染器。所有 `LocalDateTime`、`Instant` 和 MongoDB `Date` 通过 `TimeFormatUtil` 统一显示为 `yyyy-MM-dd HH:mm 北京时间`。
+
+创建工单表单在 UI 层校验标题、分类和问题描述，缺失控件使用红色边框并通过 LayeredPane 在窗口右下角显示非模态提示；输入完成后即时恢复边框。`BusinessService.createTicket` 同时拒绝空问题描述，确保界面校验无法被绕过。
+
+`AppTheme.submitOnEnter` 统一多行输入键位：Enter 执行提交，Shift+Enter 保留换行。客户回复、评价、客服回复和内部备注使用 `TextEntryDialog`，创建工单描述与联系备注使用同一键位规则；单行搜索、登录、注册和资料字段按 Enter 执行对应主操作。
 
 ### 3.2 Service 层
 
@@ -82,6 +92,8 @@ MySQL DAO 继承 `BaseDAO`，提供通用查询、更新和事务封装；MongoD
 | --- | --- |
 | MySQL | `UserDAO`、`ProfileDAO`、`CategoryDAO`、`ItemDAO`、`OrderDAO`、`SystemLogImportDAO` |
 | MongoDB | `DetailDAO`、`CommentDAO`、`LogDAO`、`SystemLogDAO` |
+
+`OrderDAO` 提供工单摘要联表查询和游标分页查询；`DetailDAO.findByItemIds` 使用 `$in` 批量读取列表所需详情。`CrossDatabaseQueryService` 负责将两类结果按 `item_id` 合并，避免逐条查询造成 N+1 数据库访问。
 
 ### 3.4 配置层
 
@@ -218,11 +230,19 @@ MongoDB 数据库名默认为 `ticket_management_logs`。
 | --- | --- |
 | MySQL 连接 | HikariCP 连接池复用连接，管理员端可查看连接池实时状态 |
 | 普通用户工单分页 | `orders(user_id, created_at)`、`orders(user_id, status, created_at)` |
+| 普通用户翻页 | 以 `created_at` 和 `order_id` 组成稳定游标，使用“多取一条”判断是否有下一页，避免深页 `OFFSET` 扫描 |
 | 管理员工单分页 | `orders(status, created_at)` |
+| 工单列表摘要 | `orders`、`items`、`categories`、`users` 一次联表读取；MongoDB 详情按当前页批量 `$in` 查询 |
 | 分类最近工单 | `items(category_id, created_at)` |
 | 标题检索 | `items.title` 全文索引 |
 | MongoDB 行为查询 | `user_id`、`item_id`、`action_type`、`created_at` 及组合索引 |
 | MongoDB 审计查询 | `log_type`、`log_level`、`user_id`、`timestamp` 及组合索引 |
+
+行为日志、评论和系统日志的默认聚合窗口为近 30 天；排行榜、标签汇总和用户汇总默认限制为最多 20 条。管理员统计和工作台中的数据库读取均通过 `SwingWorker` 在后台执行，避免阻塞 Swing 事件分发线程。
+
+创建工单同样通过 `SwingWorker` 提交，提交期间禁用主按钮并显示进度文字。工单列表提供加载、空结果和错误状态；登录支持 Enter，主要弹窗支持 Esc 关闭。用户退出时继续执行会话缓存和凭据清理，避免不同账号间残留界面数据。
+
+异步任务在启动前捕获当前用户和会话版本；工单列表、统计报表等可重复查询还维护请求序号或取消上一任务。任务完成时只有会话和请求序号仍匹配才更新组件，从而避免快速筛选、退出或切换账号后旧响应覆盖新界面。管理员工单列表按 50 条分页，并将状态和标题关键词同时下推到 MySQL 联表查询。
 
 管理员工作台提供“连接池监控”入口，展示 HikariCP 的池名称、最大连接数、最小空闲连接、正在使用连接、空闲连接、总连接数、等待连接线程、使用率和超时配置。该面板每 0.8 秒自动刷新，并提供“模拟占用连接”按钮，课堂展示时可临时借出 3 条连接保持 8 秒，直观看到正在使用连接数和使用率上升。该面板用于运行期观察 MySQL 连接池是否拥塞，支撑连接池监控加分项。
 
