@@ -11,9 +11,11 @@ import com.ticket.model.User;
 import com.ticket.service.BusinessService;
 import com.ticket.service.CategoryService;
 import com.ticket.service.CrossDatabaseQueryService;
+import com.ticket.service.CrossDatabaseQueryService.UserWorkOverview;
 import com.ticket.service.RecommendService;
 import com.ticket.service.UserService;
 import com.ticket.ui.MainFrame;
+import com.ticket.ui.component.DonutChartPanel;
 import com.ticket.ui.component.TextEntryDialog;
 import com.ticket.ui.table.OrderTableModel;
 import com.ticket.ui.theme.AppTheme;
@@ -37,6 +39,7 @@ import java.awt.event.MouseEvent;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -50,6 +53,7 @@ import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
@@ -59,6 +63,7 @@ import javax.swing.SwingWorker;
 import javax.swing.border.Border;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
+import javax.swing.table.DefaultTableModel;
 
 public class UserWorkbenchPanel extends JPanel {
     private final MainFrame mainFrame;
@@ -69,6 +74,29 @@ public class UserWorkbenchPanel extends JPanel {
     private final CategoryService categoryService = new CategoryService();
     private final Map<Long, String> categoryNameById = new HashMap<>();
     private final JLabel headerLabel = new JLabel("未登录");
+    private final CardLayout workspaceLayout = new CardLayout();
+    private final JPanel workspaceCards = new JPanel(workspaceLayout);
+    private final Map<String, JToggleButton> workspaceNavigation = new java.util.LinkedHashMap<>();
+    private String activeWorkspace = "home";
+    private final JPanel homePanel = new JPanel(new BorderLayout(0, 14));
+    private final JLabel homeGreetingLabel = new JLabel("服务概览");
+    private final JLabel homeTotalLabel = new JLabel("—");
+    private final JLabel homePendingLabel = new JLabel("—");
+    private final JLabel homeProcessingLabel = new JLabel("—");
+    private final JLabel homeCompletedLabel = new JLabel("—");
+    private final JLabel homeUpdatedLabel = AppTheme.muted("尚未更新");
+    private final JLabel homeRecentHint = AppTheme.muted("正在加载最近工单…");
+    private final DonutChartPanel homeStatusChart = new DonutChartPanel();
+    private final DefaultTableModel homeRecentModel = new DefaultTableModel(
+        new Object[]{"工单编号", "标题", "状态", "优先级", "创建时间"}, 0) {
+        @Override
+        public boolean isCellEditable(int row, int column) {
+            return false;
+        }
+    };
+    private final JTable homeRecentTable = new JTable(homeRecentModel);
+    private final List<CrossTicketDTO> homeRecentTickets = new ArrayList<>();
+    private SwingWorker<UserWorkOverview, Void> homeOverviewWorker;
     private final OrderTableModel tableModel = new OrderTableModel();
     private final JTable table = new JTable(tableModel);
     private final JTextField titleField = new JTextField(24);
@@ -113,7 +141,7 @@ public class UserWorkbenchPanel extends JPanel {
         setBackground(AppTheme.PAGE);
         initOptionModels();
         configureFormControls();
-        JButton refreshButton = new JButton("刷新工单");
+        JButton refreshButton = new JButton("刷新当前页");
         JButton changePasswordButton = new JButton("修改密码");
         JButton logoutButton = new JButton("退出登录");
         AppTheme.secondary(refreshButton);
@@ -126,7 +154,7 @@ public class UserWorkbenchPanel extends JPanel {
         configureTicketTable();
         add(buildTabContent(), BorderLayout.CENTER);
 
-        refreshButton.addActionListener(event -> loadOrders());
+        refreshButton.addActionListener(event -> refreshActiveWorkspace());
         changePasswordButton.addActionListener(event -> {
             if (currentUser != null) {
                 mainFrame.showPasswordChange(currentUser, false);
@@ -167,13 +195,13 @@ public class UserWorkbenchPanel extends JPanel {
     private JPanel buildTabContent() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(AppTheme.PAGE);
-        CardLayout cardLayout = new CardLayout();
-        JPanel cards = new JPanel(cardLayout);
-        cards.setBackground(AppTheme.PAGE);
-        cards.setBorder(BorderFactory.createEmptyBorder(16, 18, 18, 18));
-        cards.add(buildMyTicketsPanel(), "orders");
-        cards.add(buildCreateTicketPanel(), "create");
-        cards.add(buildProfilePanel(), "profile");
+        workspaceCards.setBackground(AppTheme.PAGE);
+        workspaceCards.setBorder(BorderFactory.createEmptyBorder(16, 18, 18, 18));
+        buildHomePanel();
+        workspaceCards.add(homePanel, "home");
+        workspaceCards.add(buildMyTicketsPanel(), "orders");
+        workspaceCards.add(buildCreateTicketPanel(), "create");
+        workspaceCards.add(buildProfilePanel(), "profile");
 
         JPanel navigation = new JPanel();
         navigation.setLayout(new javax.swing.BoxLayout(navigation, javax.swing.BoxLayout.Y_AXIS));
@@ -189,23 +217,51 @@ public class UserWorkbenchPanel extends JPanel {
         sectionLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
         navigation.add(sectionLabel);
         ButtonGroup group = new ButtonGroup();
+        JToggleButton homeButton = new JToggleButton("服务概览");
         JToggleButton ordersButton = new JToggleButton("我的工单");
         JToggleButton createButton = new JToggleButton("创建工单");
         JToggleButton profileButton = new JToggleButton("联系信息");
-        for (JToggleButton button : new JToggleButton[]{ordersButton, createButton, profileButton}) {
+        for (JToggleButton button : new JToggleButton[]{homeButton, ordersButton, createButton, profileButton}) {
             styleSideNavigationButton(button);
             group.add(button);
             navigation.add(button);
             navigation.add(javax.swing.Box.createVerticalStrut(4));
         }
+        workspaceNavigation.put("home", homeButton);
+        workspaceNavigation.put("orders", ordersButton);
+        workspaceNavigation.put("create", createButton);
+        workspaceNavigation.put("profile", profileButton);
         navigation.add(javax.swing.Box.createVerticalGlue());
-        ordersButton.setSelected(true);
-        ordersButton.addActionListener(event -> cardLayout.show(cards, "orders"));
-        createButton.addActionListener(event -> cardLayout.show(cards, "create"));
-        profileButton.addActionListener(event -> cardLayout.show(cards, "profile"));
+        homeButton.setSelected(true);
+        homeButton.addActionListener(event -> {
+            showWorkspace("home");
+            loadHomeOverview();
+        });
+        ordersButton.addActionListener(event -> showWorkspace("orders"));
+        createButton.addActionListener(event -> showWorkspace("create"));
+        profileButton.addActionListener(event -> showWorkspace("profile"));
         panel.add(navigation, BorderLayout.WEST);
-        panel.add(cards, BorderLayout.CENTER);
+        panel.add(workspaceCards, BorderLayout.CENTER);
         return panel;
+    }
+
+    private void showWorkspace(String workspace) {
+        String target = workspaceNavigation.containsKey(workspace) ? workspace : "home";
+        activeWorkspace = target;
+        workspaceLayout.show(workspaceCards, target);
+        JToggleButton navigationButton = workspaceNavigation.get(target);
+        if (navigationButton != null) {
+            navigationButton.setSelected(true);
+        }
+    }
+
+    private void refreshActiveWorkspace() {
+        switch (activeWorkspace) {
+            case "home" -> loadHomeOverview();
+            case "profile" -> loadProfile();
+            case "create" -> loadCategories();
+            default -> loadOrders();
+        }
     }
 
     private void styleSideNavigationButton(JToggleButton button) {
@@ -226,6 +282,224 @@ public class UserWorkbenchPanel extends JPanel {
         });
     }
 
+    private void buildHomePanel() {
+        homePanel.setBackground(AppTheme.PAGE);
+
+        JPanel welcome = AppTheme.surface(new BorderLayout(16, 0));
+        JPanel welcomeText = new JPanel(new GridLayout(0, 1, 0, 5));
+        welcomeText.setOpaque(false);
+        homeGreetingLabel.setFont(homeGreetingLabel.getFont().deriveFont(java.awt.Font.BOLD, 25f));
+        welcomeText.add(homeGreetingLabel);
+        welcome.add(welcomeText, BorderLayout.WEST);
+        homeUpdatedLabel.setHorizontalAlignment(javax.swing.SwingConstants.RIGHT);
+        welcome.add(homeUpdatedLabel, BorderLayout.EAST);
+        homePanel.add(welcome, BorderLayout.NORTH);
+
+        JPanel metrics = new JPanel(new GridLayout(1, 4, 14, 0));
+        metrics.setOpaque(false);
+        metrics.add(createHomeMetricCard("全部工单", homeTotalLabel));
+        metrics.add(createHomeMetricCard("待处理", homePendingLabel));
+        metrics.add(createHomeMetricCard("处理中", homeProcessingLabel));
+        metrics.add(createHomeMetricCard("已完成", homeCompletedLabel));
+
+        homeStatusChart.setCenterTitle("我的工单");
+        homeStatusChart.setSelectionListener(this::openOrders);
+        JPanel chartCard = AppTheme.surface(new BorderLayout(0, 8));
+        JLabel chartTitle = new JLabel("工单状态分布");
+        chartTitle.setFont(chartTitle.getFont().deriveFont(java.awt.Font.BOLD, 16f));
+        chartCard.add(chartTitle, BorderLayout.NORTH);
+        chartCard.add(homeStatusChart, BorderLayout.CENTER);
+        chartCard.setMinimumSize(new Dimension(320, 0));
+
+        AppTheme.styleTable(homeRecentTable);
+        homeRecentTable.getColumnModel().getColumn(0).setPreferredWidth(80);
+        homeRecentTable.getColumnModel().getColumn(0).setMaxWidth(110);
+        homeRecentTable.getColumnModel().getColumn(2).setPreferredWidth(80);
+        homeRecentTable.getColumnModel().getColumn(2).setMaxWidth(100);
+        homeRecentTable.getColumnModel().getColumn(3).setPreferredWidth(75);
+        homeRecentTable.getColumnModel().getColumn(3).setMaxWidth(90);
+        homeRecentTable.getColumnModel().getColumn(4).setPreferredWidth(150);
+        homeRecentTable.getColumnModel().getColumn(2).setCellRenderer(
+            new StatusTagRenderer(StatusTagRenderer.Kind.STATUS));
+        homeRecentTable.getColumnModel().getColumn(3).setCellRenderer(
+            new StatusTagRenderer(StatusTagRenderer.Kind.PRIORITY));
+        homeRecentTable.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent event) {
+                if (event.getClickCount() >= 2) {
+                    showHomeRecentTicket(homeRecentTable.getSelectedRow());
+                }
+            }
+        });
+        JPanel recentCard = AppTheme.surface(new BorderLayout(0, 8));
+        JLabel recentTitle = new JLabel("最近工单");
+        recentTitle.setFont(recentTitle.getFont().deriveFont(java.awt.Font.BOLD, 16f));
+        recentCard.add(recentTitle, BorderLayout.NORTH);
+        recentCard.add(AppTheme.scroll(homeRecentTable), BorderLayout.CENTER);
+        recentCard.add(homeRecentHint, BorderLayout.SOUTH);
+
+        JPanel quickActions = new JPanel(new GridLayout(1, 4, 8, 0));
+        quickActions.setOpaque(false);
+        quickActions.add(createHomeQuickButton("创建新工单", () -> showWorkspace("create"), true));
+        quickActions.add(createHomeQuickButton("查看处理中", () -> openOrders(1), false));
+        quickActions.add(createHomeQuickButton("全部工单", () -> openOrders(null), false));
+        quickActions.add(createHomeQuickButton("联系信息", () -> showWorkspace("profile"), false));
+        JPanel quickCard = AppTheme.surface(new BorderLayout(0, 8));
+        JLabel quickTitle = new JLabel("快捷操作");
+        quickTitle.setFont(quickTitle.getFont().deriveFont(java.awt.Font.BOLD, 15f));
+        quickCard.add(quickTitle, BorderLayout.NORTH);
+        quickCard.add(quickActions, BorderLayout.CENTER);
+
+        JPanel rightColumn = new JPanel(new BorderLayout(0, 12));
+        rightColumn.setOpaque(false);
+        rightColumn.add(recentCard, BorderLayout.CENTER);
+        rightColumn.add(quickCard, BorderLayout.SOUTH);
+        rightColumn.setMinimumSize(new Dimension(430, 0));
+
+        JSplitPane dashboard = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, chartCard, rightColumn);
+        dashboard.setResizeWeight(0.38);
+        dashboard.setDividerSize(8);
+        dashboard.setBorder(null);
+        dashboard.setOpaque(false);
+
+        JPanel content = new JPanel(new BorderLayout(0, 14));
+        content.setOpaque(false);
+        content.add(metrics, BorderLayout.NORTH);
+        content.add(dashboard, BorderLayout.CENTER);
+        homePanel.add(content, BorderLayout.CENTER);
+    }
+
+    private JPanel createHomeMetricCard(String title, JLabel valueLabel) {
+        JPanel card = AppTheme.surface(new BorderLayout(0, 8));
+        valueLabel.setFont(valueLabel.getFont().deriveFont(java.awt.Font.BOLD, 28f));
+        valueLabel.setForeground(AppTheme.TEXT);
+        card.add(AppTheme.muted(title), BorderLayout.NORTH);
+        card.add(valueLabel, BorderLayout.CENTER);
+        return card;
+    }
+
+    private JButton createHomeQuickButton(String text, Runnable action, boolean primary) {
+        JButton button = new JButton(text);
+        if (primary) {
+            AppTheme.primary(button);
+        } else {
+            AppTheme.secondary(button);
+        }
+        button.addActionListener(event -> action.run());
+        return button;
+    }
+
+    private void loadHomeOverview() {
+        if (currentUser == null) {
+            return;
+        }
+        User actor = currentUser;
+        long expectedSession = sessionVersion;
+        homeGreetingLabel.setText("你好，" + actor.getUsername());
+        homeTotalLabel.setText("—");
+        homePendingLabel.setText("—");
+        homeProcessingLabel.setText("—");
+        homeCompletedLabel.setText("—");
+        homeUpdatedLabel.setText("更新中…");
+        homeRecentHint.setText("正在加载最近工单…");
+        if (homeOverviewWorker != null && !homeOverviewWorker.isDone()) {
+            homeOverviewWorker.cancel(true);
+        }
+        homeOverviewWorker = new SwingWorker<>() {
+            @Override
+            protected UserWorkOverview doInBackground() {
+                return crossDatabaseQueryService.userWorkOverview(actor, 6);
+            }
+
+            @Override
+            protected void done() {
+                if (isCancelled() || !isCurrentSession(actor, expectedSession)) {
+                    return;
+                }
+                try {
+                    updateHomeOverview(get());
+                } catch (Exception ex) {
+                    homeUpdatedLabel.setText("更新失败");
+                    homeRecentHint.setText("概览加载失败，请点击顶部刷新重试。");
+                }
+            }
+        };
+        homeOverviewWorker.execute();
+    }
+
+    private void updateHomeOverview(UserWorkOverview overview) {
+        Map<Integer, Long> counts = overview.statusCounts();
+        long total = counts.values().stream().mapToLong(Long::longValue).sum();
+        homeTotalLabel.setText(String.valueOf(total));
+        homePendingLabel.setText(String.valueOf(counts.getOrDefault(0, 0L)));
+        homeProcessingLabel.setText(String.valueOf(counts.getOrDefault(1, 0L)));
+        homeCompletedLabel.setText(String.valueOf(counts.getOrDefault(2, 0L)));
+        homeStatusChart.setSegments(List.of(
+            new DonutChartPanel.Segment("待处理", counts.getOrDefault(0, 0L), AppTheme.WARNING, 0),
+            new DonutChartPanel.Segment("处理中", counts.getOrDefault(1, 0L), AppTheme.PRIMARY, 1),
+            new DonutChartPanel.Segment("已完成", counts.getOrDefault(2, 0L), AppTheme.SUCCESS, 2),
+            new DonutChartPanel.Segment("已关闭", counts.getOrDefault(3, 0L), new Color(107, 114, 128), 3),
+            new DonutChartPanel.Segment("已取消", counts.getOrDefault(4, 0L), new Color(190, 75, 75), 4)
+        ));
+
+        homeRecentTickets.clear();
+        homeRecentTickets.addAll(overview.recentTickets());
+        homeRecentModel.setRowCount(0);
+        for (CrossTicketDTO ticket : homeRecentTickets) {
+            ItemDetail.Metadata metadata = ticket.getItemDetail() == null ? null : ticket.getItemDetail().getMetadata();
+            homeRecentModel.addRow(new Object[]{
+                ticket.getItem() == null ? "" : ticket.getItem().getItemId(),
+                ticket.getItem() == null ? "" : ticket.getItem().getTitle(),
+                ticket.getOrder() == null ? "" : statusText(ticket.getOrder().getStatus()),
+                priorityText(metadata == null ? null : metadata.getPriority()),
+                ticket.getOrder() == null ? "—" : TimeFormatUtil.format(ticket.getOrder().getCreatedAt())
+            });
+        }
+        homeRecentHint.setText(homeRecentTickets.isEmpty()
+            ? "还没有工单，可以从下方快捷入口创建第一张工单。" : "双击可查看工单详情");
+        homeUpdatedLabel.setText("更新于 " + java.time.ZonedDateTime.now(java.time.ZoneId.of("Asia/Shanghai"))
+            .format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")));
+    }
+
+    private String priorityText(String priority) {
+        return switch (priority == null ? "" : priority) {
+            case "URGENT" -> "紧急";
+            case "HIGH" -> "高";
+            case "MEDIUM" -> "中";
+            case "LOW" -> "低";
+            default -> priority == null ? "" : priority;
+        };
+    }
+
+    private void showHomeRecentTicket(int selectedRow) {
+        if (selectedRow < 0 || selectedRow >= homeRecentTickets.size()) {
+            return;
+        }
+        CrossTicketDTO ticket = homeRecentTickets.get(selectedRow);
+        if (ticket.getItem() != null && ticket.getItem().getItemId() != null) {
+            showTicketDetailDialog(ticket.getItem().getItemId());
+        }
+    }
+
+    private void openOrders(Integer status) {
+        keywordField.setText("");
+        int targetIndex = 0;
+        for (int index = 0; index < statusFilterBox.getItemCount(); index++) {
+            StatusOption option = statusFilterBox.getItemAt(index);
+            if (java.util.Objects.equals(option.status(), status)) {
+                targetIndex = index;
+                break;
+            }
+        }
+        resetPagination();
+        showWorkspace("orders");
+        if (statusFilterBox.getSelectedIndex() == targetIndex) {
+            loadOrders();
+        } else {
+            statusFilterBox.setSelectedIndex(targetIndex);
+        }
+    }
+
     private void configureFormControls() {
         AppTheme.styleComboBox(statusFilterBox);
         AppTheme.styleComboBox(categoryBox);
@@ -243,15 +517,20 @@ public class UserWorkbenchPanel extends JPanel {
         this.currentUser = user;
         resetPagination();
         headerLabel.setText("当前用户：" + user.getUsername());
+        showWorkspace("home");
         loadCategories();
         loadOrders();
         loadProfile();
+        loadHomeOverview();
     }
 
     /** 退出时清理当前用户视图，避免下一位用户看到上一会话的缓存数据。 */
     public void clearSession() {
         sessionVersion++;
         orderRequestVersion++;
+        if (homeOverviewWorker != null) {
+            homeOverviewWorker.cancel(true);
+        }
         currentUser = null;
         resetPagination();
         currentTotal = 0;
@@ -268,6 +547,16 @@ public class UserWorkbenchPanel extends JPanel {
         keywordField.setText("");
         statusFilterBox.setSelectedIndex(0);
         headerLabel.setText("未登录");
+        homeGreetingLabel.setText("服务概览");
+        homeTotalLabel.setText("—");
+        homePendingLabel.setText("—");
+        homeProcessingLabel.setText("—");
+        homeCompletedLabel.setText("—");
+        homeUpdatedLabel.setText("尚未更新");
+        homeRecentHint.setText("登录后可查看服务概览");
+        homeRecentTickets.clear();
+        homeRecentModel.setRowCount(0);
+        homeStatusChart.setSegments(List.of());
         saveProfileButton.setEnabled(true);
         ordersStatusLabel.setForeground(AppTheme.MUTED);
         ordersStatusLabel.setText("登录后可查看工单");
@@ -451,6 +740,7 @@ public class UserWorkbenchPanel extends JPanel {
                             descriptionArea.setText("");
                             resetPagination();
                             loadOrders();
+                            loadHomeOverview();
                         } catch (Exception ex) {
                             Throwable cause = ex.getCause() == null ? ex : ex.getCause();
                             AppTheme.toast(UserWorkbenchPanel.this,
@@ -1047,12 +1337,14 @@ public class UserWorkbenchPanel extends JPanel {
             if (addCustomerReply(itemId)) {
                 refreshDetail.run();
                 loadOrders();
+                loadHomeOverview();
             }
         });
         rateButton.addActionListener(event -> {
             if (rateTicket(itemId)) {
                 refreshDetail.run();
                 loadOrders();
+                loadHomeOverview();
             }
         });
         closeButton.addActionListener(event -> dialog.dispose());

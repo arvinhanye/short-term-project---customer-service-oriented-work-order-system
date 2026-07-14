@@ -2,7 +2,6 @@ package com.ticket.ui.theme;
 
 import java.awt.Color;
 import java.awt.Component;
-import javax.swing.BorderFactory;
 import javax.swing.JTable;
 import javax.swing.table.DefaultTableCellRenderer;
 
@@ -25,9 +24,12 @@ public class StatusTagRenderer extends DefaultTableCellRenderer {
         String text = value == null ? "—" : String.valueOf(value);
         setText(text);
         Color color = colorFor(text);
-        setForeground(selected ? AppTheme.TEXT : color);
-        setBackground(selected ? table.getSelectionBackground() : new Color(color.getRed(), color.getGreen(), color.getBlue(), 24));
-        setBorder(BorderFactory.createEmptyBorder(3, 8, 3, 8));
+        setForeground(color);
+        setBackground(selected ? AppTheme.TABLE_SELECTED
+            : new Color((color.getRed() + 255 * 9) / 10,
+                (color.getGreen() + 255 * 9) / 10,
+                (color.getBlue() + 255 * 9) / 10));
+        setBorder(AppTheme.tableCellBorder(selected, column));
         return this;
     }
 

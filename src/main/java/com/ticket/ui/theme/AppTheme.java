@@ -35,7 +35,11 @@ public final class AppTheme {
     public static final Color WARNING = new Color(217, 119, 6);
     public static final Color DANGER = new Color(220, 38, 38);
     public static final Color BORDER = new Color(222, 224, 227);
+    public static final Color TABLE_ALTERNATE = new Color(250, 251, 252);
+    public static final Color TABLE_HOVER = new Color(245, 248, 252);
+    public static final Color TABLE_SELECTED = new Color(220, 233, 252);
     public static final int GAP = 12;
+    private static final String TABLE_HOVER_ROW = "app-table-hover-row";
 
     private AppTheme() {
     }
@@ -129,11 +133,46 @@ public final class AppTheme {
     }
 
     public static void styleTable(JTable table) {
-        table.setRowHeight(34);
-        table.setRowMargin(2);
+        table.setRowHeight(38);
+        table.setRowMargin(0);
+        table.setIntercellSpacing(new Dimension(0, 0));
         table.setFillsViewportHeight(true);
         table.setShowGrid(false);
+        table.setSelectionBackground(TABLE_SELECTED);
+        table.setSelectionForeground(TEXT);
         table.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
+        table.setDefaultRenderer(Object.class, new DefaultTableCellRenderer() {
+            @Override
+            public Component getTableCellRendererComponent(JTable currentTable, Object value, boolean selected,
+                                                            boolean focused, int row, int column) {
+                super.getTableCellRendererComponent(currentTable, value, selected, false, row, column);
+                setOpaque(true);
+                setBackground(tableCellBackground(currentTable, selected, row));
+                setForeground(TEXT);
+                setBorder(tableCellBorder(selected, column));
+                setVerticalAlignment(SwingConstants.CENTER);
+                return this;
+            }
+        });
+        table.addMouseMotionListener(new java.awt.event.MouseMotionAdapter() {
+            @Override
+            public void mouseMoved(java.awt.event.MouseEvent event) {
+                int row = table.rowAtPoint(event.getPoint());
+                Object previous = table.getClientProperty(TABLE_HOVER_ROW);
+                int previousRow = previous instanceof Integer value ? value : -1;
+                if (row != previousRow) {
+                    table.putClientProperty(TABLE_HOVER_ROW, row);
+                    table.repaint();
+                }
+            }
+        });
+        table.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseExited(java.awt.event.MouseEvent event) {
+                table.putClientProperty(TABLE_HOVER_ROW, -1);
+                table.repaint();
+            }
+        });
         JTableHeader header = table.getTableHeader();
         header.setReorderingAllowed(false);
         header.setBackground(new Color(245, 246, 247));
@@ -150,6 +189,26 @@ public final class AppTheme {
             BorderFactory.createMatteBorder(0, 0, 1, 1, BORDER),
             BorderFactory.createEmptyBorder(0, 8, 0, 8)));
         header.setDefaultRenderer(headerRenderer);
+    }
+
+    public static Color tableCellBackground(JTable table, boolean selected, int row) {
+        if (selected) {
+            return TABLE_SELECTED;
+        }
+        Object hoverValue = table.getClientProperty(TABLE_HOVER_ROW);
+        if (hoverValue instanceof Integer hoverRow && hoverRow == row) {
+            return TABLE_HOVER;
+        }
+        return row % 2 == 0 ? SURFACE : TABLE_ALTERNATE;
+    }
+
+    public static Border tableCellBorder(boolean selected, int column) {
+        if (selected && column == 0) {
+            return BorderFactory.createCompoundBorder(
+                BorderFactory.createMatteBorder(0, 3, 0, 0, PRIMARY),
+                BorderFactory.createEmptyBorder(0, 5, 0, 8));
+        }
+        return BorderFactory.createEmptyBorder(0, 8, 0, 8);
     }
 
     public static void styleComboBox(JComboBox<?> comboBox) {

@@ -173,6 +173,26 @@ public class OrderDAO extends BaseDAO {
         return new PageResult<>(records, total, normalizedPage, normalizedPageSize);
     }
 
+    /**
+     * 返回满足 MySQL 条件的全部摘要，供依赖 MongoDB 元数据的跨库筛选先过滤、再分页。
+     */
+    public List<CrossTicketDTO> listTicketSummaries(Long userId, Integer status, String keyword) {
+        String normalizedKeyword = keyword == null ? "" : keyword.trim();
+        boolean byUser = userId != null;
+        boolean byStatus = status != null;
+        boolean byKeyword = !normalizedKeyword.isBlank();
+        String where = " WHERE 1 = 1" + (byUser ? " AND o.user_id = ?" : "")
+            + (byStatus ? " AND o.status = ?" : "") + (byKeyword ? " AND i.title LIKE ?" : "");
+        String from = " FROM orders o JOIN items i ON o.item_id = i.item_id JOIN categories c ON i.category_id = c.category_id "
+            + "JOIN users u ON o.user_id = u.user_id";
+        return query("SELECT o.order_id, o.user_id, o.item_id, o.amount, o.status AS order_status, "
+                + "o.created_at AS order_created_at, i.title, i.category_id, i.status AS item_status, "
+                + "i.created_at AS item_created_at, i.updated_at AS item_updated_at, c.name AS category_name, u.username"
+                + from + where + " ORDER BY o.created_at DESC, o.order_id DESC",
+            statement -> bindSummaryFilter(statement, userId, status, normalizedKeyword, byUser, byStatus, byKeyword),
+            this::mapTicketSummary);
+    }
+
     public CursorPageResult<CrossTicketDTO> pageTicketSummariesAfter(Long userId, Integer status, String keyword,
                                                                        java.time.LocalDateTime cursorCreatedAt,
                                                                        Long cursorOrderId, int pageSize) {
