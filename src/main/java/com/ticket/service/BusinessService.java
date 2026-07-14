@@ -12,6 +12,7 @@ import com.ticket.dto.PageResult;
 import com.ticket.exception.BusinessException;
 import com.ticket.exception.DBException;
 import com.ticket.model.Comment;
+import com.ticket.model.Category;
 import com.ticket.model.Item;
 import com.ticket.model.ItemDetail;
 import com.ticket.model.Order;
@@ -52,8 +53,15 @@ public class BusinessService {
         if (amount.scale() > 2) {
             throw new BusinessException("金额最多保留 2 位小数");
         }
-        if (categoryId == null || categoryDAO.findById(categoryId) == null) {
+        Category category = categoryId == null ? null : categoryDAO.findById(categoryId);
+        if (category == null) {
             throw new BusinessException("工单分类不存在");
+        }
+        if (category.getParentId() != null) {
+            Category parent = categoryDAO.findById(category.getParentId());
+            if (parent == null || parent.getParentId() != null) {
+                throw new BusinessException("该分类层级异常，请选择一级或二级分类");
+            }
         }
         String normalizedPriority = validatePriority(priority);
         Item item = new Item();

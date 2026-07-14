@@ -18,6 +18,8 @@ import com.ticket.ui.component.TextEntryDialog;
 import com.ticket.ui.table.OrderTableModel;
 import com.ticket.ui.theme.AppTheme;
 import com.ticket.ui.theme.StatusTagRenderer;
+import com.ticket.ui.theme.WindowIconUtil;
+import com.ticket.util.CategoryDisplayUtil;
 import com.ticket.util.TimeFormatUtil;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -25,6 +27,7 @@ import java.awt.GridLayout;
 import java.awt.Insets;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
+import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.event.KeyAdapter;
@@ -111,16 +114,24 @@ public class UserWorkbenchPanel extends JPanel {
         initOptionModels();
         configureFormControls();
         JButton refreshButton = new JButton("刷新工单");
+        JButton changePasswordButton = new JButton("修改密码");
         JButton logoutButton = new JButton("退出登录");
         AppTheme.secondary(refreshButton);
+        AppTheme.secondary(changePasswordButton);
         AppTheme.secondary(logoutButton);
         headerLabel.setForeground(AppTheme.MUTED);
-        add(AppTheme.pageHeader("工单中心", "提交、跟进和评价你的服务请求", headerLabel, refreshButton, logoutButton), BorderLayout.NORTH);
+        add(AppTheme.pageHeader("工单中心", "提交、跟进和评价你的服务请求",
+            headerLabel, refreshButton, changePasswordButton, logoutButton), BorderLayout.NORTH);
 
         configureTicketTable();
         add(buildTabContent(), BorderLayout.CENTER);
 
         refreshButton.addActionListener(event -> loadOrders());
+        changePasswordButton.addActionListener(event -> {
+            if (currentUser != null) {
+                mainFrame.showPasswordChange(currentUser, false);
+            }
+        });
         previousPageButton.addActionListener(event -> {
             if (currentPage > 1) {
                 currentPage--;
@@ -156,33 +167,63 @@ public class UserWorkbenchPanel extends JPanel {
     private JPanel buildTabContent() {
         JPanel panel = new JPanel(new BorderLayout());
         panel.setBackground(AppTheme.PAGE);
-        panel.setBorder(BorderFactory.createEmptyBorder(12, 16, 16, 16));
         CardLayout cardLayout = new CardLayout();
         JPanel cards = new JPanel(cardLayout);
         cards.setBackground(AppTheme.PAGE);
+        cards.setBorder(BorderFactory.createEmptyBorder(16, 18, 18, 18));
         cards.add(buildMyTicketsPanel(), "orders");
         cards.add(buildCreateTicketPanel(), "create");
         cards.add(buildProfilePanel(), "profile");
 
-        JPanel navigation = new JPanel(new FlowLayout(FlowLayout.CENTER, 0, 0));
-        navigation.setOpaque(false);
-        navigation.setBorder(BorderFactory.createEmptyBorder(0, 0, 10, 0));
+        JPanel navigation = new JPanel();
+        navigation.setLayout(new javax.swing.BoxLayout(navigation, javax.swing.BoxLayout.Y_AXIS));
+        navigation.setBackground(new Color(248, 249, 250));
+        navigation.setPreferredSize(new Dimension(205, 0));
+        navigation.setBorder(BorderFactory.createCompoundBorder(
+            BorderFactory.createMatteBorder(0, 0, 0, 1, AppTheme.BORDER),
+            BorderFactory.createEmptyBorder(18, 12, 14, 12)));
+        JLabel sectionLabel = new JLabel("工单服务");
+        sectionLabel.setForeground(AppTheme.MUTED);
+        sectionLabel.setFont(sectionLabel.getFont().deriveFont(java.awt.Font.BOLD, 12f));
+        sectionLabel.setBorder(BorderFactory.createEmptyBorder(0, 10, 8, 0));
+        sectionLabel.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        navigation.add(sectionLabel);
         ButtonGroup group = new ButtonGroup();
         JToggleButton ordersButton = new JToggleButton("我的工单");
         JToggleButton createButton = new JToggleButton("创建工单");
         JToggleButton profileButton = new JToggleButton("联系信息");
         for (JToggleButton button : new JToggleButton[]{ordersButton, createButton, profileButton}) {
-            AppTheme.segment(button);
+            styleSideNavigationButton(button);
             group.add(button);
             navigation.add(button);
+            navigation.add(javax.swing.Box.createVerticalStrut(4));
         }
+        navigation.add(javax.swing.Box.createVerticalGlue());
         ordersButton.setSelected(true);
         ordersButton.addActionListener(event -> cardLayout.show(cards, "orders"));
         createButton.addActionListener(event -> cardLayout.show(cards, "create"));
         profileButton.addActionListener(event -> cardLayout.show(cards, "profile"));
-        panel.add(navigation, BorderLayout.NORTH);
+        panel.add(navigation, BorderLayout.WEST);
         panel.add(cards, BorderLayout.CENTER);
         return panel;
+    }
+
+    private void styleSideNavigationButton(JToggleButton button) {
+        button.setUI(new javax.swing.plaf.basic.BasicToggleButtonUI());
+        button.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
+        button.setFocusPainted(false);
+        button.setOpaque(true);
+        button.setContentAreaFilled(true);
+        button.setBorder(BorderFactory.createEmptyBorder(10, 12, 10, 12));
+        button.setMaximumSize(new Dimension(Integer.MAX_VALUE, 42));
+        button.setAlignmentX(JComponent.LEFT_ALIGNMENT);
+        button.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        button.getModel().addChangeListener(event -> {
+            boolean selected = button.isSelected();
+            button.setBackground(selected ? new Color(232, 243, 255) : new Color(248, 249, 250));
+            button.setForeground(selected ? AppTheme.PRIMARY_DARK : AppTheme.TEXT);
+            button.setFont(button.getFont().deriveFont(selected ? java.awt.Font.BOLD : java.awt.Font.PLAIN));
+        });
     }
 
     private void configureFormControls() {
@@ -215,6 +256,7 @@ public class UserWorkbenchPanel extends JPanel {
         resetPagination();
         currentTotal = 0;
         tableModel.setTickets(List.of());
+        tableModel.setCategoryDisplayNames(Map.of());
         categoryBox.removeAllItems();
         categoryNameById.clear();
         titleField.setText("");
@@ -276,7 +318,6 @@ public class UserWorkbenchPanel extends JPanel {
         JLabel title = new JLabel("我的工单");
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 17f));
         titleLine.add(title, BorderLayout.WEST);
-        titleLine.add(AppTheme.muted("双击或按 Enter 查看详情"), BorderLayout.EAST);
         filterCard.add(titleLine, BorderLayout.NORTH);
         filterCard.add(filters, BorderLayout.CENTER);
         panel.add(filterCard, BorderLayout.NORTH);
@@ -322,10 +363,10 @@ public class UserWorkbenchPanel extends JPanel {
         GridBagConstraints outer = new GridBagConstraints();
         outer.gridx = 0;
         outer.gridy = 0;
-        outer.weightx = 0.68;
+        outer.weightx = 1;
         outer.weighty = 1;
         outer.fill = GridBagConstraints.BOTH;
-        outer.insets = new Insets(0, 0, 0, 10);
+        outer.insets = new Insets(0, 0, 0, 0);
         JPanel form = AppTheme.surface(new GridBagLayout());
         JButton recommendButton = new JButton("推荐分类");
         AppTheme.primary(createTicketButton);
@@ -339,16 +380,13 @@ public class UserWorkbenchPanel extends JPanel {
         JLabel title = new JLabel("创建新工单");
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 18f));
         form.add(title, gbc);
-        gbc.gridy = 1;
-        JLabel hint = AppTheme.muted("请尽量描述问题现象、发生时间和期望处理方式。带 * 的信息请完整填写。");
-        form.add(hint, gbc);
         gbc.gridwidth = 1;
-        addTicketFormRow(form, gbc, 2, "标题 *", titleField);
-        addTicketFormRow(form, gbc, 3, "分类 *", categoryBox);
-        addTicketFormRow(form, gbc, 4, "金额", amountField);
-        addTicketFormRow(form, gbc, 5, "优先级", priorityBox);
+        addTicketFormRow(form, gbc, 1, "标题 *", titleField);
+        addTicketFormRow(form, gbc, 2, "分类 *", categoryBox);
+        addTicketFormRow(form, gbc, 3, "金额", amountField);
+        addTicketFormRow(form, gbc, 4, "优先级", priorityBox);
         gbc.gridx = 0;
-        gbc.gridy = 6;
+        gbc.gridy = 5;
         gbc.anchor = GridBagConstraints.NORTHWEST;
         form.add(new JLabel("问题描述 *"), gbc);
         gbc.gridx = 1;
@@ -365,28 +403,12 @@ public class UserWorkbenchPanel extends JPanel {
         actions.add(recommendButton);
         actions.add(createTicketButton);
         gbc.gridx = 1;
-        gbc.gridy = 7;
+        gbc.gridy = 6;
         gbc.weighty = 0;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.anchor = GridBagConstraints.EAST;
         form.add(actions, gbc);
         content.add(form, outer);
-
-        JPanel guide = AppTheme.surface(new BorderLayout(0, 10));
-        JLabel guideTitle = new JLabel("提交小贴士");
-        guideTitle.setFont(guideTitle.getFont().deriveFont(java.awt.Font.BOLD, 16f));
-        guide.add(guideTitle, BorderLayout.NORTH);
-        JTextArea guideText = new JTextArea("1. 选择最贴近问题的分类。\n\n2. 紧急问题请标注“紧急”，并在描述中说明影响范围。\n\n3. 提交后可在“我的工单”持续查看状态和客服回复。\n\n4. 系统会根据历史使用记录提供常用分类推荐。");
-        guideText.setEditable(false);
-        guideText.setOpaque(false);
-        guideText.setForeground(AppTheme.MUTED);
-        guideText.setLineWrap(true);
-        guideText.setWrapStyleWord(true);
-        guide.add(guideText, BorderLayout.CENTER);
-        outer.gridx = 1;
-        outer.weightx = 0.32;
-        outer.insets = new Insets(0, 0, 0, 0);
-        content.add(guide, outer);
         panel.add(content, BorderLayout.CENTER);
 
         titleNormalBorder = titleField.getBorder();
@@ -598,9 +620,7 @@ public class UserWorkbenchPanel extends JPanel {
         addFormRow(preferenceBlock, 2, "服务地址", addressField);
 
         JPanel verificationBlock = buildProfileBlock("实名认证");
-        JLabel verificationHint = new JLabel("证件号码仅在实名认证弹窗中填写。");
         addFormRow(verificationBlock, 0, "认证状态", realNameAuthButton);
-        addFormRow(verificationBlock, 1, "说明", verificationHint);
 
         notesArea.setLineWrap(true);
         notesArea.setWrapStyleWord(true);
@@ -687,7 +707,7 @@ public class UserWorkbenchPanel extends JPanel {
             Category recommendation = recommendations.get(index);
             builder.append(index + 1)
                 .append(". ")
-                .append(recommendation.getName())
+                .append(categoryNameById.getOrDefault(recommendation.getCategoryId(), recommendation.getName()))
                 .append("（ID ")
                 .append(recommendation.getCategoryId())
                 .append("）")
@@ -701,6 +721,7 @@ public class UserWorkbenchPanel extends JPanel {
         long expectedSession = sessionVersion;
         categoryBox.removeAllItems();
         categoryNameById.clear();
+        tableModel.setCategoryDisplayNames(Map.of());
         new SwingWorker<List<Category>, Void>() {
             @Override
             protected List<Category> doInBackground() {
@@ -713,9 +734,15 @@ public class UserWorkbenchPanel extends JPanel {
                     return;
                 }
                 try {
-                    for (Category category : get()) {
-                        categoryBox.addItem(new CategoryOption(category.getCategoryId(), category.getName()));
-                        categoryNameById.put(category.getCategoryId(), category.getName());
+                    List<Category> categories = get();
+                    Map<Long, String> displayNames = CategoryDisplayUtil.buildDisplayNames(categories);
+                    tableModel.setCategoryDisplayNames(displayNames);
+                    for (Category category : categories) {
+                        String displayName = displayNames.get(category.getCategoryId());
+                        categoryNameById.put(category.getCategoryId(), displayName);
+                        if (!displayName.startsWith("层级异常｜")) {
+                            categoryBox.addItem(new CategoryOption(category.getCategoryId(), displayName));
+                        }
                     }
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(UserWorkbenchPanel.this, "加载分类失败", "提示", JOptionPane.WARNING_MESSAGE);
@@ -983,6 +1010,7 @@ public class UserWorkbenchPanel extends JPanel {
 
     private void showTicketDetailDialog(Long itemId) {
         JDialog dialog = new JDialog(mainFrame, "工单详情 #" + itemId, true);
+        WindowIconUtil.apply(dialog);
         AppTheme.closeOnEscape(dialog);
         dialog.setLayout(new BorderLayout());
         dialog.getContentPane().setBackground(AppTheme.PAGE);

@@ -3,6 +3,7 @@ package com.ticket.ui;
 import com.ticket.model.User;
 import com.ticket.ui.admin.AdminWorkbenchPanel;
 import com.ticket.ui.user.UserWorkbenchPanel;
+import com.ticket.ui.theme.WindowIconUtil;
 import java.awt.CardLayout;
 import java.awt.Color;
 import java.awt.Dimension;
@@ -18,12 +19,12 @@ public class MainFrame extends JFrame {
 
     public MainFrame() {
         super("工单管理系统");
+        WindowIconUtil.apply(this);
         this.loginPanel = new LoginPanel(this);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-        setSize(1280, 800);
         setMinimumSize(new Dimension(1040, 680));
         getContentPane().setBackground(new Color(246, 248, 252));
-        setLocationRelativeTo(null);
+        setExtendedState(JFrame.MAXIMIZED_BOTH);
         rootPanel.add(loginPanel, "login");
         rootPanel.add(userWorkbenchPanel, "user");
         rootPanel.add(adminWorkbenchPanel, "admin");
@@ -39,6 +40,10 @@ public class MainFrame extends JFrame {
             userWorkbenchPanel.bindUser(user);
             cardLayout.show(rootPanel, "user");
         }
+    }
+
+    public boolean showPasswordChange(User user, boolean required) {
+        return new PasswordChangeDialog(this, user, required).showDialog();
     }
 
     public void logout() {

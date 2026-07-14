@@ -31,6 +31,10 @@ class UserDAOTest {
                     phone VARCHAR(20),
                     role VARCHAR(10) NOT NULL,
                     status TINYINT NOT NULL DEFAULT 1,
+                    failed_login_attempts INT NOT NULL DEFAULT 0,
+                    locked_until TIMESTAMP NULL,
+                    must_change_password TINYINT NOT NULL DEFAULT 0,
+                    password_changed_at TIMESTAMP NULL,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
@@ -59,7 +63,7 @@ class UserDAOTest {
         user.setPhone("13800002222");
         user.setRole("ADMIN");
         user.setStatus(0);
-        String newHash = PasswordUtil.hashPassword("Ticket@456");
+        String newHash = PasswordUtil.hashPassword("RiverStone#456");
         user.setPasswordHash(newHash);
         Assertions.assertEquals(1, userDAO.update(user));
 
@@ -73,7 +77,7 @@ class UserDAOTest {
         updated.setPhone("13700003333");
         userDAO.updateBasicInfo(updated);
         userDAO.updateStatus(userId, 1);
-        String finalHash = PasswordUtil.hashPassword("Ticket@789");
+        String finalHash = PasswordUtil.hashPassword("RiverStone#789");
         Assertions.assertEquals(1, userDAO.updatePasswordHash(userId, finalHash));
 
         User finalUser = userDAO.findById(userId);
@@ -82,6 +86,28 @@ class UserDAOTest {
         Assertions.assertEquals(1, finalUser.getStatus());
         Assertions.assertEquals(finalHash, finalUser.getPasswordHash());
 
+        LocalDateTime lockedUntil = LocalDateTime.of(2026, 7, 7, 9, 0);
+        Assertions.assertEquals(1, userDAO.updateLoginSecurity(userId, 5, lockedUntil));
+        User lockedUser = userDAO.findByUsernameForAuthentication("alice_admin");
+        Assertions.assertEquals(5, lockedUser.getFailedLoginAttempts());
+        Assertions.assertEquals(lockedUntil, lockedUser.getLockedUntil());
+
+        String temporaryHash = PasswordUtil.hashPassword("HarborLight#927");
+        Assertions.assertEquals(1,
+            userDAO.updatePasswordSecurity(userId, temporaryHash, true, LocalDateTime.of(2026, 7, 7, 9, 5)));
+        User resetUser = userDAO.findByIdForSecurity(userId);
+        Assertions.assertEquals(1, resetUser.getMustChangePassword());
+        Assertions.assertEquals(0, resetUser.getFailedLoginAttempts());
+        Assertions.assertNull(resetUser.getLockedUntil());
+        Assertions.assertTrue(PasswordUtil.matches("HarborLight#927", resetUser.getPasswordHash()));
+
+        User firstFailure = userDAO.recordFailedLogin(userId, 2, 10);
+        Assertions.assertEquals(1, firstFailure.getFailedLoginAttempts());
+        Assertions.assertNull(firstFailure.getLockedUntil());
+        User secondFailure = userDAO.recordFailedLogin(userId, 2, 10);
+        Assertions.assertEquals(2, secondFailure.getFailedLoginAttempts());
+        Assertions.assertNotNull(secondFailure.getLockedUntil());
+
         Assertions.assertEquals(1, userDAO.findAll().size());
         Assertions.assertEquals(1, userDAO.deleteById(userId));
         Assertions.assertNull(userDAO.findById(userId));
@@ -89,7 +115,7 @@ class UserDAOTest {
 
     @Test
     void shouldHashAndVerifyPassword() {
-        String password = "Ticket@123";
+        String password = "RiverStone#123";
         String hash = PasswordUtil.hashPassword(password);
         Assertions.assertNotEquals(password, hash);
         Assertions.assertTrue(PasswordUtil.matches(password, hash));
@@ -98,17 +124,20 @@ class UserDAOTest {
     @Test
     void shouldRejectWeakPassword() {
         Assertions.assertThrows(RuntimeException.class, () -> PasswordUtil.hashPassword("simple1"));
-        Assertions.assertFalse(PasswordUtil.matches("Ticket@123", null));
+        Assertions.assertFalse(PasswordUtil.matches("RiverStone#123", null));
     }
 
     private User buildUser(String username, String email, String phone, String role, int status) {
         User user = new User();
         user.setUsername(username);
-        user.setPasswordHash(PasswordUtil.hashPassword("Ticket@123"));
+        user.setPasswordHash(PasswordUtil.hashPassword("RiverStone#123"));
         user.setEmail(email);
         user.setPhone(phone);
         user.setRole(role);
         user.setStatus(status);
+        user.setFailedLoginAttempts(0);
+        user.setMustChangePassword(0);
+        user.setPasswordChangedAt(LocalDateTime.of(2026, 7, 7, 8, 30));
         user.setCreatedAt(LocalDateTime.of(2026, 7, 7, 8, 30));
         user.setUpdatedAt(LocalDateTime.of(2026, 7, 7, 8, 30));
         return user;

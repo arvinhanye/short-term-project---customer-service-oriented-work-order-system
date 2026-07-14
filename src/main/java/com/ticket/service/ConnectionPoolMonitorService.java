@@ -1,6 +1,7 @@
 package com.ticket.service;
 
 import com.ticket.dto.ConnectionPoolStatusDTO;
+import com.ticket.exception.BusinessException;
 import com.ticket.model.User;
 import com.ticket.util.MySQLDBUtil;
 import java.sql.Connection;
@@ -30,7 +31,11 @@ public class ConnectionPoolMonitorService {
     public void simulateConnectionUsage(User actor, int requestedConnections, int holdSeconds) {
         UserService.requireAdmin(actor);
         ConnectionPoolStatusDTO status = MySQLDBUtil.getPoolStatus();
-        int connectionCount = Math.max(1, Math.min(requestedConnections, Math.max(1, status.getMaximumPoolSize() - 1)));
+        int safeCapacity = status.getMaximumPoolSize() - status.getActiveConnections() - 1;
+        if (safeCapacity <= 0) {
+            throw new BusinessException("写连接池可用余量不足，暂不执行模拟占用");
+        }
+        int connectionCount = Math.max(1, Math.min(requestedConnections, safeCapacity));
         int normalizedSeconds = Math.max(1, Math.min(holdSeconds, 30));
         List<Connection> connections = new ArrayList<>();
         try {
@@ -47,7 +52,7 @@ public class ConnectionPoolMonitorService {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
         } catch (Exception ex) {
-            throw new com.ticket.exception.BusinessException("模拟占用连接失败", ex);
+            throw new BusinessException("模拟占用连接失败", ex);
         } finally {
             for (Connection connection : connections) {
                 try {

@@ -25,7 +25,7 @@ public class RecommendService {
         List<Category> categories = new ArrayList<>();
         for (Long categoryId : categoryIds) {
             Category category = categoryDAO.findById(categoryId);
-            if (category != null) {
+            if (isValidTwoLevelCategory(category)) {
                 categories.add(category);
             }
             if (categories.size() == RECOMMENDATION_LIMIT) {
@@ -35,6 +35,9 @@ public class RecommendService {
         // 冷启动时提供现有分类，不改变有历史用户的“最近优先”顺序。
         if (categories.isEmpty()) {
             for (Category category : categoryDAO.findAll()) {
+                if (!isValidTwoLevelCategory(category)) {
+                    continue;
+                }
                 categories.add(category);
                 if (categories.size() == RECOMMENDATION_LIMIT) {
                     break;
@@ -42,5 +45,13 @@ public class RecommendService {
             }
         }
         return categories;
+    }
+
+    private boolean isValidTwoLevelCategory(Category category) {
+        if (category == null || category.getParentId() == null) {
+            return category != null;
+        }
+        Category parent = categoryDAO.findById(category.getParentId());
+        return parent != null && parent.getParentId() == null;
     }
 }

@@ -44,12 +44,17 @@ public class SystemHealthService {
     }
 
     private void check(HealthCheckDTO result, String checkName, CheckedRunnable runnable) {
+        long startedAt = System.nanoTime();
         try {
             runnable.run();
-            result.pass(checkName);
+            result.pass(checkName, elapsedMillis(startedAt));
         } catch (Exception ex) {
-            result.fail(checkName, ex);
+            result.fail(checkName, ex, elapsedMillis(startedAt));
         }
+    }
+
+    private long elapsedMillis(long startedAt) {
+        return Math.max(0L, (System.nanoTime() - startedAt) / 1_000_000L);
     }
 
     @FunctionalInterface

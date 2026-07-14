@@ -72,6 +72,21 @@ public abstract class BaseDAO {
         return results.isEmpty() ? null : results.get(0);
     }
 
+    /** 安全敏感读取走写库，避免读副本延迟绕过锁定或刚完成的密码更新。 */
+    protected <T> T queryOneOnWrite(String sql, SqlConsumer<PreparedStatement> binder, RowMapper<T> mapper) {
+        try (Connection connection = getWriteConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            if (binder != null) {
+                binder.accept(statement);
+            }
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? mapper.map(resultSet) : null;
+            }
+        } catch (SQLException ex) {
+            throw new DBException("MySQL security query failed", ex);
+        }
+    }
+
     protected int update(String sql, SqlConsumer<PreparedStatement> binder) {
         return executeTransactionCallback(connection -> {
             try (PreparedStatement statement = connection.prepareStatement(sql)) {

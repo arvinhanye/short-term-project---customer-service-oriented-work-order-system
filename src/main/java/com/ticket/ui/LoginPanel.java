@@ -44,9 +44,7 @@ public class LoginPanel extends JPanel {
         titlePanel.setOpaque(false);
         JLabel title = new JLabel("工单管理系统");
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 23f));
-        JLabel subtitle = AppTheme.muted("集中提交、追踪与处理每一条服务请求");
         titlePanel.add(title);
-        titlePanel.add(subtitle);
         gbc.gridx = 0;
         gbc.gridy = 0;
         gbc.gridwidth = 2;
@@ -113,13 +111,26 @@ public class LoginPanel extends JPanel {
         new SwingWorker<User, Void>() {
             @Override
             protected User doInBackground() {
-                return userService.login(usernameField.getText(), new String(passwordField.getPassword()));
+                char[] passwordChars = passwordField.getPassword();
+                try {
+                    return userService.login(usernameField.getText(), new String(passwordChars));
+                } finally {
+                    java.util.Arrays.fill(passwordChars, '\0');
+                }
             }
 
             @Override
             protected void done() {
                 try {
-                    mainFrame.onLoginSuccess(get());
+                    User user = get();
+                    passwordField.setText("");
+                    if (Integer.valueOf(1).equals(user.getMustChangePassword())
+                            && !mainFrame.showPasswordChange(user, true)) {
+                        statusLabel.setForeground(AppTheme.WARNING);
+                        statusLabel.setText("必须修改密码后才能进入系统");
+                        return;
+                    }
+                    mainFrame.onLoginSuccess(user);
                     statusLabel.setForeground(AppTheme.SUCCESS);
                     statusLabel.setText("登录成功");
                 } catch (Exception ex) {

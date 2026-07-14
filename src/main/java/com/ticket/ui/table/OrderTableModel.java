@@ -5,11 +5,13 @@ import com.ticket.model.ItemDetail;
 import com.ticket.util.TimeFormatUtil;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import javax.swing.table.AbstractTableModel;
 
 public class OrderTableModel extends AbstractTableModel {
     private final String[] columns = {"工单编号", "标题", "分类", "优先级", "状态", "金额", "创建时间", "更新时间"};
     private List<CrossTicketDTO> tickets = new ArrayList<>();
+    private Map<Long, String> categoryDisplayNames = Map.of();
 
     public void setTickets(List<CrossTicketDTO> tickets) {
         this.tickets = tickets == null ? new ArrayList<>() : tickets;
@@ -21,6 +23,11 @@ public class OrderTableModel extends AbstractTableModel {
             return null;
         }
         return tickets.get(rowIndex);
+    }
+
+    public void setCategoryDisplayNames(Map<Long, String> categoryDisplayNames) {
+        this.categoryDisplayNames = categoryDisplayNames == null ? Map.of() : Map.copyOf(categoryDisplayNames);
+        fireTableDataChanged();
     }
 
     @Override
@@ -39,7 +46,8 @@ public class OrderTableModel extends AbstractTableModel {
         return switch (columnIndex) {
             case 0 -> ticket.getItem() == null ? "" : ticket.getItem().getItemId();
             case 1 -> ticket.getItem() == null ? "" : ticket.getItem().getTitle();
-            case 2 -> ticket.getCategory() == null ? "" : ticket.getCategory().getName();
+            case 2 -> ticket.getCategory() == null ? ""
+                : categoryDisplayNames.getOrDefault(ticket.getCategory().getCategoryId(), ticket.getCategory().getName());
             case 3 -> priorityText(ticket);
             case 4 -> ticket.getOrder() == null ? "" : statusText(ticket.getOrder().getStatus());
             case 5 -> ticket.getOrder() == null ? "" : ticket.getOrder().getAmount();

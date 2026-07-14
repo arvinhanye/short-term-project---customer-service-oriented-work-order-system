@@ -1,6 +1,7 @@
 package com.ticket.ui.component;
 
 import com.ticket.ui.theme.AppTheme;
+import com.ticket.ui.theme.WindowIconUtil;
 import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dialog;
@@ -30,6 +31,7 @@ public final class TextEntryDialog {
         JDialog dialog = owner instanceof Frame frame
             ? new JDialog(frame, title, true)
             : new JDialog(owner instanceof Dialog existing ? existing : null, title, Dialog.ModalityType.APPLICATION_MODAL);
+        WindowIconUtil.apply(dialog);
         boolean[] accepted = {false};
         JTextArea textArea = new JTextArea(rows, columns);
         textArea.setLineWrap(true);

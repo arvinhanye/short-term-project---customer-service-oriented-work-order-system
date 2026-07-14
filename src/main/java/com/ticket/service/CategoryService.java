@@ -4,9 +4,7 @@ import com.ticket.dao.mysql.CategoryDAO;
 import com.ticket.exception.BusinessException;
 import com.ticket.model.Category;
 import com.ticket.model.User;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 /** Centralizes authorization and integrity rules for administrator category management. */
 public class CategoryService {
@@ -50,8 +48,9 @@ public class CategoryService {
         if (categoryId.equals(parentId)) {
             throw new BusinessException("分类不能设置为自己的父分类");
         }
-        validateParent(parentId);
-        ensureNoCycle(categoryId, parentId);
+        if (parentId != null && categoryDAO.countChildren(categoryId) > 0) {
+            throw new BusinessException("该一级分类仍有二级分类，不能改为二级分类");
+        }
         Category category = newCategory(name, parentId);
         category.setCategoryId(categoryId);
         categoryDAO.update(category);
@@ -64,7 +63,7 @@ public class CategoryService {
             throw new BusinessException("分类不存在");
         }
         if (categoryDAO.countChildren(categoryId) > 0 || categoryDAO.countItems(categoryId) > 0) {
-            throw new BusinessException("该分类仍有子分类或工单，不能删除");
+            throw new BusinessException("该分类仍有二级分类或关联工单，不能删除");
         }
         categoryDAO.delete(categoryId);
         audit(actor, "删除分类 " + categoryId, "DELETE_CATEGORY");
@@ -82,20 +81,15 @@ public class CategoryService {
     }
 
     private void validateParent(Long parentId) {
-        if (parentId != null && categoryDAO.findById(parentId) == null) {
+        if (parentId == null) {
+            return;
+        }
+        Category parent = categoryDAO.findById(parentId);
+        if (parent == null) {
             throw new BusinessException("父分类不存在");
         }
-    }
-
-    private void ensureNoCycle(Long categoryId, Long parentId) {
-        Set<Long> visited = new HashSet<>();
-        Long candidate = parentId;
-        while (candidate != null) {
-            if (!visited.add(candidate) || categoryId.equals(candidate)) {
-                throw new BusinessException("分类层级不能形成循环");
-            }
-            Category parent = categoryDAO.findById(candidate);
-            candidate = parent == null ? null : parent.getParentId();
+        if (parent.getParentId() != null) {
+            throw new BusinessException("只能选择一级分类作为父分类，系统最多支持两级分类");
         }
     }
 

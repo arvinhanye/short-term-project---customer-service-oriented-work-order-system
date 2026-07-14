@@ -14,19 +14,22 @@ ALTER TABLE items AUTO_INCREMENT = 2001;
 ALTER TABLE orders AUTO_INCREMENT = 3001;
 ALTER TABLE profiles AUTO_INCREMENT = 5001;
 
-INSERT INTO users (user_id, username, password_hash, email, phone, role, status, created_at, updated_at) VALUES
-    (10001, 'admin01', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin01@ticket.local', '13800000001', 'ADMIN', 1, '2026-01-01 09:00:00', '2026-01-01 09:00:00'),
-    (10002, 'admin02', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin02@ticket.local', '13800000002', 'ADMIN', 1, '2026-01-02 09:00:00', '2026-01-02 09:00:00'),
-    (10003, 'admin03', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin03@ticket.local', '13800000003', 'ADMIN', 1, '2026-01-03 09:00:00', '2026-01-03 09:00:00'),
-    (10004, 'user01', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user01@ticket.local', '13900000001', 'USER', 1, '2026-01-04 09:00:00', '2026-01-04 09:00:00'),
-    (10005, 'user02', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user02@ticket.local', '13900000002', 'USER', 1, '2026-01-05 09:00:00', '2026-01-05 09:00:00'),
-    (10006, 'user03', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user03@ticket.local', '13900000003', 'USER', 1, '2026-01-06 09:00:00', '2026-01-06 09:00:00'),
-    (10007, 'user04', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user04@ticket.local', '13900000004', 'USER', 1, '2026-01-07 09:00:00', '2026-01-07 09:00:00'),
-    (10008, 'user05', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user05@ticket.local', '13900000005', 'USER', 1, '2026-01-08 09:00:00', '2026-01-08 09:00:00'),
-    (10009, 'user06', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user06@ticket.local', '13900000006', 'USER', 0, '2026-01-09 09:00:00', '2026-01-09 09:00:00'),
-    (10010, 'user07', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'user07@ticket.local', '13900000007', 'USER', 1, '2026-01-10 09:00:00', '2026-01-10 09:00:00'),
-    (10011, 'admin04', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin04@ticket.local', '13800000004', 'ADMIN', 1, '2026-01-11 09:00:00', '2026-01-11 09:00:00'),
-    (10012, 'admin05', '$2a$10$pIWuroiczMvy/H64tHdN9e38AT9Z1Pp1xOdy3.3ZFyjCNZRQ51586', 'admin05@ticket.local', '13800000005', 'ADMIN', 1, '2026-01-12 09:00:00', '2026-01-12 09:00:00');
+-- 每个内置账号使用不同的临时密码，并在首次登录时强制修改。
+INSERT INTO users (user_id, username, password_hash, email, phone, role, status,
+                   failed_login_attempts, locked_until, must_change_password, password_changed_at,
+                   created_at, updated_at) VALUES
+    (10001, 'admin01', '$2a$12$OzJdGwxR6JOPJnEfhJHeOOf49viWN2SY26HIi04oo.SlDoujbeObq', 'admin01@ticket.local', '13800000001', 'ADMIN', 1, 0, NULL, 1, NULL, '2026-01-01 09:00:00', '2026-01-01 09:00:00'),
+    (10002, 'admin02', '$2a$12$Xj3FjyJfDPPbur5BJd2icey4bxSD7jR86nc.fNibClFq/bLtfghQa', 'admin02@ticket.local', '13800000002', 'ADMIN', 1, 0, NULL, 1, NULL, '2026-01-02 09:00:00', '2026-01-02 09:00:00'),
+    (10003, 'admin03', '$2a$12$bp0Fghd7zsc/TdOoaDm6bO5AkaqEGd8piZTM9uesnoKugtaVi53Tm', 'admin03@ticket.local', '13800000003', 'ADMIN', 1, 0, NULL, 1, NULL, '2026-01-03 09:00:00', '2026-01-03 09:00:00'),
+    (10004, 'user01', '$2a$12$XUOV3QxRm5lcVXsCAA9A3euDlAoZg/BRWJLDMLoeoZKZYxqBSG5pa', 'user01@ticket.local', '13900000001', 'USER', 1, 0, NULL, 1, NULL, '2026-01-04 09:00:00', '2026-01-04 09:00:00'),
+    (10005, 'user02', '$2a$12$ymlkux1AKQIsKIFkJF7F2eE2fNE.rFz3FyUhLTVdxuOcLSyLUEoYG', 'user02@ticket.local', '13900000002', 'USER', 1, 0, NULL, 1, NULL, '2026-01-05 09:00:00', '2026-01-05 09:00:00'),
+    (10006, 'user03', '$2a$12$YksUENCIP.kkFx8K7t6qZOfEASug39pXpeGTLYkvaf0XZqP7PtZa2', 'user03@ticket.local', '13900000003', 'USER', 1, 0, NULL, 1, NULL, '2026-01-06 09:00:00', '2026-01-06 09:00:00'),
+    (10007, 'user04', '$2a$12$NJoBy1cT663AaAc/K9WrKuZz6nNh1PD14CaZUgjpQ/TCUiBOK15Km', 'user04@ticket.local', '13900000004', 'USER', 1, 0, NULL, 1, NULL, '2026-01-07 09:00:00', '2026-01-07 09:00:00'),
+    (10008, 'user05', '$2a$12$/bI4dBSunVTD5DUkKQaT0u7AQJ4WThpE9bJ/pc9Cn6v2O/boJZEDO', 'user05@ticket.local', '13900000005', 'USER', 1, 0, NULL, 1, NULL, '2026-01-08 09:00:00', '2026-01-08 09:00:00'),
+    (10009, 'user06', '$2a$12$4MU4fb8K7pyAxHKl4qjije2hRDx0xCo/KwbuDx2zfMMogUmUpi5JW', 'user06@ticket.local', '13900000006', 'USER', 0, 0, NULL, 1, NULL, '2026-01-09 09:00:00', '2026-01-09 09:00:00'),
+    (10010, 'user07', '$2a$12$Q2WK1dK81z5DbVUxgg.j.uwQvVEL6.ZGcdpil8KMrWIr9Gv5MtTEW', 'user07@ticket.local', '13900000007', 'USER', 1, 0, NULL, 1, NULL, '2026-01-10 09:00:00', '2026-01-10 09:00:00'),
+    (10011, 'admin04', '$2a$12$XUOdfrcTzfzXyvO0BnjOiu1A4iwMjIiRtutfhfbPTW63V2Dlq.Jg2', 'admin04@ticket.local', '13800000004', 'ADMIN', 1, 0, NULL, 1, NULL, '2026-01-11 09:00:00', '2026-01-11 09:00:00'),
+    (10012, 'admin05', '$2a$12$xmWTZDHkgzRZCt.dWfNpbOOWYnMmLunXo46UFSVzokIPG80ltdDnK', 'admin05@ticket.local', '13800000005', 'ADMIN', 1, 0, NULL, 1, NULL, '2026-01-12 09:00:00', '2026-01-12 09:00:00');
 
 INSERT INTO categories (category_id, name, parent_id) VALUES
     (4001, '账户问题', NULL),

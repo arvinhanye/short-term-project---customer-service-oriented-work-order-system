@@ -91,6 +91,10 @@ erDiagram
 | phone | VARCHAR(20) |  | 手机号 |
 | role | ENUM('ADMIN','USER') | NOT NULL | 用户角色 |
 | status | TINYINT | NOT NULL, DEFAULT 1 | 1 启用，0 禁用 |
+| failed_login_attempts | INT | NOT NULL, DEFAULT 0 | 连续登录失败次数 |
+| locked_until | DATETIME | NULL | 临时登录保护截止时间 |
+| must_change_password | TINYINT | NOT NULL, DEFAULT 0 | 1 表示进入工作台前必须换密 |
+| password_changed_at | DATETIME | NULL | 最近密码修改时间 |
 | created_at | DATETIME | NOT NULL | 创建时间 |
 | updated_at | DATETIME | NOT NULL | 更新时间 |
 
@@ -109,13 +113,13 @@ erDiagram
 
 ### 3.3 categories
 
-工单分类表，支持父子分类。
+工单分类表，业务规则限定为严格两级：`parent_id` 为空时为一级分类；非空时为二级分类，且其父记录的 `parent_id` 必须为空。该跨行层级规则由 `CategoryService` 统一校验，外键继续保证父记录存在。
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
 | category_id | BIGINT | PK, AUTO_INCREMENT | 分类编号 |
 | name | VARCHAR(50) | NOT NULL | 分类名称 |
-| parent_id | BIGINT | FK | 父分类编号 |
+| parent_id | BIGINT | FK | 一级父分类编号；为空表示一级分类 |
 
 ### 3.4 items
 

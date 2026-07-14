@@ -25,16 +25,16 @@ import javax.swing.table.DefaultTableCellRenderer;
 
 /** Shared visual tokens for the Swing client. This class intentionally uses only JDK Swing APIs. */
 public final class AppTheme {
-    public static final Color PAGE = new Color(246, 248, 252);
+    public static final Color PAGE = new Color(245, 246, 247);
     public static final Color SURFACE = Color.WHITE;
-    public static final Color TEXT = new Color(31, 41, 55);
-    public static final Color MUTED = new Color(100, 116, 139);
-    public static final Color PRIMARY = new Color(37, 99, 235);
-    public static final Color PRIMARY_DARK = new Color(30, 64, 175);
+    public static final Color TEXT = new Color(31, 35, 41);
+    public static final Color MUTED = new Color(100, 106, 115);
+    public static final Color PRIMARY = new Color(51, 112, 255);
+    public static final Color PRIMARY_DARK = new Color(36, 91, 219);
     public static final Color SUCCESS = new Color(22, 163, 74);
     public static final Color WARNING = new Color(217, 119, 6);
     public static final Color DANGER = new Color(220, 38, 38);
-    public static final Color BORDER = new Color(226, 232, 240);
+    public static final Color BORDER = new Color(222, 224, 227);
     public static final int GAP = 12;
 
     private AppTheme() {
@@ -62,7 +62,7 @@ public final class AppTheme {
         UIManager.put("ScrollBar.width", 12);
         UIManager.put("Table.showHorizontalLines", false);
         UIManager.put("Table.showVerticalLines", false);
-        UIManager.put("Table.selectionBackground", new Color(219, 234, 254));
+        UIManager.put("Table.selectionBackground", new Color(232, 243, 255));
         UIManager.put("Table.selectionForeground", TEXT);
         UIManager.put("Label.foreground", TEXT);
         UIManager.put("TitledBorder.titleColor", TEXT);
@@ -87,14 +87,11 @@ public final class AppTheme {
         header.setBackground(SURFACE);
         header.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createMatteBorder(0, 0, 1, 0, BORDER), BorderFactory.createEmptyBorder(12, 18, 12, 18)));
-        JPanel labels = new JPanel(new GridLayout(0, 1, 0, 2));
+        JPanel labels = new JPanel(new GridLayout(1, 1));
         labels.setOpaque(false);
         JLabel titleLabel = new JLabel(title);
         titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 20f));
-        JLabel subtitleLabel = new JLabel(subtitle);
-        subtitleLabel.setForeground(MUTED);
         labels.add(titleLabel);
-        labels.add(subtitleLabel);
         header.add(labels, BorderLayout.CENTER);
         if (actions != null && actions.length > 0) {
             JPanel actionPanel = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 8, 0));
@@ -112,7 +109,7 @@ public final class AppTheme {
     }
 
     public static void secondary(JButton button) {
-        styleButton(button, SURFACE, TEXT, new Color(239, 246, 255));
+        styleButton(button, SURFACE, TEXT, new Color(245, 246, 247));
         button.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(BORDER),
             BorderFactory.createEmptyBorder(6, 12, 6, 12)));
     }
@@ -139,12 +136,12 @@ public final class AppTheme {
         table.setSelectionMode(javax.swing.ListSelectionModel.SINGLE_SELECTION);
         JTableHeader header = table.getTableHeader();
         header.setReorderingAllowed(false);
-        header.setBackground(new Color(241, 245, 249));
+        header.setBackground(new Color(245, 246, 247));
         header.setForeground(MUTED);
         header.setPreferredSize(new Dimension(0, 34));
         DefaultTableCellRenderer headerRenderer = new DefaultTableCellRenderer();
         headerRenderer.setOpaque(true);
-        headerRenderer.setBackground(new Color(241, 245, 249));
+        headerRenderer.setBackground(new Color(245, 246, 247));
         headerRenderer.setForeground(MUTED);
         headerRenderer.setFont(header.getFont().deriveFont(Font.BOLD));
         headerRenderer.setHorizontalAlignment(SwingConstants.LEFT);
@@ -157,7 +154,39 @@ public final class AppTheme {
 
     public static void styleComboBox(JComboBox<?> comboBox) {
         Dimension preferred = comboBox.getPreferredSize();
-        comboBox.setUI(new javax.swing.plaf.basic.BasicComboBoxUI());
+        comboBox.setUI(new javax.swing.plaf.basic.BasicComboBoxUI() {
+            @Override
+            public void paintCurrentValueBackground(java.awt.Graphics graphics, java.awt.Rectangle bounds,
+                                                    boolean focused) {
+                graphics.setColor(SURFACE);
+                graphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            }
+
+            @Override
+            public void paintCurrentValue(java.awt.Graphics graphics, java.awt.Rectangle bounds,
+                                          boolean focused) {
+                super.paintCurrentValue(graphics, bounds, false);
+            }
+        });
+        comboBox.setRenderer(new javax.swing.DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(javax.swing.JList<?> list, Object value, int index,
+                                                           boolean selected, boolean focused) {
+                super.getListCellRendererComponent(list, value, index, selected, focused);
+                setBorder(BorderFactory.createEmptyBorder(0, 8, 0, 8));
+                if (index < 0) {
+                    setBackground(SURFACE);
+                    setForeground(TEXT);
+                } else if (selected) {
+                    setBackground(new Color(232, 243, 255));
+                    setForeground(PRIMARY_DARK);
+                } else {
+                    setBackground(SURFACE);
+                    setForeground(TEXT);
+                }
+                return this;
+            }
+        });
         comboBox.setOpaque(true);
         comboBox.setBackground(SURFACE);
         comboBox.setForeground(TEXT);
@@ -182,7 +211,7 @@ public final class AppTheme {
             BorderFactory.createEmptyBorder(8, 18, 8, 18)));
         button.getModel().addChangeListener(event -> {
             boolean selected = button.isSelected();
-            button.setBackground(selected ? new Color(219, 234, 254) : SURFACE);
+            button.setBackground(selected ? new Color(232, 243, 255) : SURFACE);
             button.setForeground(selected ? PRIMARY_DARK : TEXT);
         });
         button.setBackground(SURFACE);
@@ -242,8 +271,8 @@ public final class AppTheme {
         toast.add(label, BorderLayout.CENTER);
         Dimension size = toast.getPreferredSize();
         toast.setSize(size);
-        int x = Math.max(16, layeredPane.getWidth() - size.width - 24);
-        int y = Math.max(16, layeredPane.getHeight() - size.height - 24);
+        int x = Math.max(16, (layeredPane.getWidth() - size.width) / 2);
+        int y = 24;
         toast.setLocation(x, y);
         layeredPane.add(toast, javax.swing.JLayeredPane.POPUP_LAYER);
         layeredPane.repaint();

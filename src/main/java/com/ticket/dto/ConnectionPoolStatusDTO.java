@@ -117,12 +117,19 @@ public class ConnectionPoolStatusDTO {
         return Math.min(100, Math.round(activeConnections * 100.0f / maximumPoolSize));
     }
 
+    public int getAvailableConnections() {
+        return Math.max(0, maximumPoolSize - activeConnections);
+    }
+
     public String getStatusText() {
         if (threadsAwaitingConnection > 0) {
-            return "等待连接";
+            return "存在等待";
         }
         if (maximumPoolSize > 0 && activeConnections >= maximumPoolSize) {
             return "连接已满";
+        }
+        if (getUsagePercent() >= 80) {
+            return "负载较高";
         }
         return "正常";
     }

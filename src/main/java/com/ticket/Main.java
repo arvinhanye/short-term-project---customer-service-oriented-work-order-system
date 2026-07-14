@@ -2,6 +2,7 @@ package com.ticket;
 
 import com.ticket.ui.MainFrame;
 import com.ticket.ui.theme.AppTheme;
+import com.ticket.ui.theme.WindowIconUtil;
 import com.ticket.service.CrossDatabaseRepairService;
 import com.ticket.service.MongoLogRetryService;
 import com.ticket.util.MongoDBUtil;
@@ -15,6 +16,7 @@ public class Main {
     private static final Logger LOGGER = LoggerFactory.getLogger(Main.class);
 
     public static void main(String[] args) {
+        WindowIconUtil.installForApplication();
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
             LOGGER.info("Shutting down ticket-management application");
             MongoDBUtil.close();
@@ -42,6 +44,7 @@ public class Main {
             AppTheme.install();
             MainFrame mainFrame = new MainFrame();
             mainFrame.setVisible(true);
+            mainFrame.setExtendedState(MainFrame.MAXIMIZED_BOTH);
         });
     }
 }

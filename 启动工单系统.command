@@ -14,6 +14,8 @@ JAR_PATH="${PROJECT_DIR}/target/ticket-management.jar"
 ALWAYS_BUILD="${ALWAYS_BUILD:-1}"
 MYSQL_HOST="127.0.0.1"
 MYSQL_PORT="3306"
+MYSQL_APP_USER="${TICKET_MYSQL_USERNAME:-ticket_app}"
+MYSQL_KEYCHAIN_SERVICE="ticket-management-mysql"
 MONGO_HOST="127.0.0.1"
 MONGO_PORT="27017"
 
@@ -121,6 +123,41 @@ check_already_running() {
     fi
 }
 
+configure_mysql_credentials() {
+    export TICKET_MYSQL_USERNAME="${MYSQL_APP_USER}"
+    if [[ "${TICKET_MYSQL_USERNAME:l}" == "root" ]]; then
+        fail "应用禁止使用 MySQL root，请先创建最小权限的专用账号。"
+    fi
+
+    if [[ -z "${TICKET_MYSQL_PASSWORD:-}" ]] && command -v security >/dev/null 2>&1; then
+        local keychain_password
+        keychain_password=$(security find-generic-password \
+            -a "${TICKET_MYSQL_USERNAME}" -s "${MYSQL_KEYCHAIN_SERVICE}" -w 2>/dev/null || true)
+        if [[ -n "${keychain_password}" ]]; then
+            export TICKET_MYSQL_PASSWORD="${keychain_password}"
+            echo "已从 macOS 钥匙串读取 MySQL 专用账号：${TICKET_MYSQL_USERNAME}"
+        fi
+    fi
+
+    if [[ -z "${TICKET_MYSQL_PASSWORD:-}" ]]; then
+        echo "MySQL 用户名固定为：${TICKET_MYSQL_USERNAME}"
+        read -rs "TICKET_MYSQL_PASSWORD?请输入该账号的数据库密码（此处不是用户名）："
+        echo
+        export TICKET_MYSQL_PASSWORD
+    fi
+    [[ -n "${TICKET_MYSQL_PASSWORD}" ]] || fail "MySQL 应用账号密码不能为空。"
+
+    if command -v mysql >/dev/null 2>&1; then
+        if ! MYSQL_PWD="${TICKET_MYSQL_PASSWORD}" mysql \
+            -h "${MYSQL_HOST}" -P "${MYSQL_PORT}" --protocol=TCP \
+            -u "${TICKET_MYSQL_USERNAME}" --batch --skip-column-names \
+            -e "SELECT 1" >/dev/null 2>&1; then
+            fail "MySQL 专用账号 ${TICKET_MYSQL_USERNAME} 验证失败。请确认账号已创建且密码正确；不要在密码位置输入用户名。"
+        fi
+        echo "MySQL 账号验证通过：${TICKET_MYSQL_USERNAME}"
+    fi
+}
+
 print_title
 
 echo "项目目录：${PROJECT_DIR}"
@@ -137,6 +174,7 @@ echo "检查 MySQL：${MYSQL_HOST}:${MYSQL_PORT}"
 if ! check_port "${MYSQL_HOST}" "${MYSQL_PORT}"; then
     fail "MySQL 未在 ${MYSQL_HOST}:${MYSQL_PORT} 监听。请先启动 MySQL，并确认 src/main/resources/db.properties 中的配置正确。"
 fi
+configure_mysql_credentials
 
 echo "检查 MongoDB：${MONGO_HOST}:${MONGO_PORT}"
 if ! check_port "${MONGO_HOST}" "${MONGO_PORT}"; then

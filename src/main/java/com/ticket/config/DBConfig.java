@@ -25,11 +25,23 @@ public final class DBConfig {
     }
 
     public static String get(String key) {
+        String systemValue = System.getProperty("ticket." + key);
+        if (systemValue != null && !systemValue.isBlank()) {
+            return systemValue;
+        }
+        String environmentValue = System.getenv(toEnvironmentKey(key));
+        if (environmentValue != null && !environmentValue.isBlank()) {
+            return environmentValue;
+        }
         return PROPERTIES.getProperty(key);
     }
 
     public static int getInt(String key, int defaultValue) {
-        String value = PROPERTIES.getProperty(key);
-        return value == null ? defaultValue : Integer.parseInt(value);
+        String value = get(key);
+        return value == null || value.isBlank() ? defaultValue : Integer.parseInt(value);
+    }
+
+    static String toEnvironmentKey(String key) {
+        return "TICKET_" + key.toUpperCase(java.util.Locale.ROOT).replace('.', '_');
     }
 }

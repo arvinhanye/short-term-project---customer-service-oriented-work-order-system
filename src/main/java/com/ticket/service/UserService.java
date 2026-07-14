@@ -14,6 +14,8 @@ import java.util.regex.Pattern;
 public class UserService {
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
     private static final Pattern PHONE_PATTERN = Pattern.compile("^1\\d{10}$");
+    static final int MAX_FAILED_LOGIN_ATTEMPTS = 5;
+    static final int LOGIN_LOCK_MINUTES = 10;
     private final UserDAO userDAO = new UserDAO();
     private final ProfileDAO profileDAO = new ProfileDAO();
     private final ActionLogService actionLogService = new ActionLogService();
@@ -21,19 +23,25 @@ public class UserService {
 
     public User register(String username, String password, String email, String phone) {
         validateRegistration(username, password, email, phone);
-        if (userDAO.findByUsername(username) != null) {
+        String normalizedUsername = username.trim();
+        String normalizedEmail = email.trim();
+        String normalizedPhone = phone.trim();
+        if (userDAO.findByUsername(normalizedUsername) != null) {
             throw new BusinessException("用户名已存在");
         }
-        if (userDAO.findByEmail(email) != null) {
+        if (userDAO.findByEmail(normalizedEmail) != null) {
             throw new BusinessException("邮箱已存在");
         }
         User user = new User();
-        user.setUsername(username.trim());
-        user.setPasswordHash(PasswordUtil.hashPassword(password));
-        user.setEmail(email.trim());
-        user.setPhone(phone.trim());
+        user.setUsername(normalizedUsername);
+        user.setPasswordHash(PasswordUtil.hashPassword(password, normalizedUsername, normalizedEmail, normalizedPhone));
+        user.setEmail(normalizedEmail);
+        user.setPhone(normalizedPhone);
         user.setRole("USER");
         user.setStatus(1);
+        user.setFailedLoginAttempts(0);
+        user.setMustChangePassword(0);
+        user.setPasswordChangedAt(LocalDateTime.now());
         user.setCreatedAt(LocalDateTime.now());
         user.setUpdatedAt(LocalDateTime.now());
         Long userId;
@@ -60,18 +68,97 @@ public class UserService {
         if (username == null || username.isBlank() || password == null || password.isBlank()) {
             throw new BusinessException("请输入用户名和密码");
         }
-        User user = userDAO.findByUsername(username.trim());
-        if (user == null || !PasswordUtil.matches(password, user.getPasswordHash())) {
+        User user = userDAO.findByUsernameForAuthentication(username.trim());
+        if (user == null) {
+            PasswordUtil.consumeDummyHash(password);
             auditLogService.write(null, "LOGIN_FAIL", "WARN", "登录失败", "USER_LOGIN");
+            throw new BusinessException("用户名或密码错误");
+        }
+        LocalDateTime now = LocalDateTime.now();
+        if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(now)) {
+            auditLogService.write(String.valueOf(user.getUserId()), "LOGIN_FAIL", "WARN",
+                "账号处于登录保护期", "USER_LOGIN_THROTTLED");
+            throw new BusinessException("登录失败次数过多，请稍后再试");
+        }
+        if (user.getLockedUntil() != null && !user.getLockedUntil().isAfter(now)) {
+            userDAO.updateLoginSecurity(user.getUserId(), 0, null);
+        }
+        if (!PasswordUtil.matches(password, user.getPasswordHash())) {
+            User failedState = userDAO.recordFailedLogin(
+                user.getUserId(), MAX_FAILED_LOGIN_ATTEMPTS, LOGIN_LOCK_MINUTES);
+            auditLogService.write(String.valueOf(user.getUserId()), "LOGIN_FAIL", "WARN", "登录失败", "USER_LOGIN");
+            if (failedState != null && failedState.getLockedUntil() != null
+                    && failedState.getLockedUntil().isAfter(now)) {
+                throw new BusinessException("登录失败次数过多，账号已临时保护 10 分钟");
+            }
             throw new BusinessException("用户名或密码错误");
         }
         if (user.getStatus() != 1) {
             auditLogService.write(String.valueOf(user.getUserId()), "USER_DISABLED", "WARN", "用户已被禁用", "USER_LOGIN");
             throw new BusinessException("用户已被禁用");
         }
+        userDAO.updateLoginSecurity(user.getUserId(), 0, null);
+        user.setFailedLoginAttempts(0);
+        user.setLockedUntil(null);
+        if (PasswordUtil.needsRehash(user.getPasswordHash())) {
+            userDAO.updatePasswordHash(user.getUserId(), PasswordUtil.rehashPassword(password));
+        }
         actionLogService.write(String.valueOf(user.getUserId()), null, "LOGIN");
         auditLogService.write(String.valueOf(user.getUserId()), "LOGIN", "INFO", "登录成功", "USER_LOGIN");
-        return user;
+        return withoutPasswordHash(user);
+    }
+
+    public void changePassword(User actor, String currentPassword, String newPassword) {
+        requireActiveUser(actor);
+        User stored = userDAO.findByIdForSecurity(actor.getUserId());
+        if (stored == null || !PasswordUtil.matches(currentPassword, stored.getPasswordHash())) {
+            auditLogService.write(String.valueOf(actor.getUserId()), "PASSWORD_CHANGE_FAIL", "WARN",
+                "修改密码时当前密码校验失败", "CHANGE_PASSWORD");
+            throw new BusinessException("当前密码不正确");
+        }
+        if (PasswordUtil.matches(newPassword, stored.getPasswordHash())) {
+            throw new BusinessException("新密码不能与当前密码相同");
+        }
+        String newHash = PasswordUtil.hashPassword(newPassword,
+            stored.getUsername(), stored.getEmail(), stored.getPhone());
+        if (userDAO.updatePasswordSecurity(stored.getUserId(), newHash, false, LocalDateTime.now()) != 1) {
+            throw new BusinessException("密码修改失败");
+        }
+        actor.setMustChangePassword(0);
+        actor.setPasswordChangedAt(LocalDateTime.now());
+        auditLogService.write(String.valueOf(actor.getUserId()), "PASSWORD_CHANGE", "INFO",
+            "用户已修改密码", "CHANGE_PASSWORD");
+    }
+
+    public String resetPassword(User actor, Long userId) {
+        requireAdmin(actor);
+        if (userId == null) {
+            throw new BusinessException("用户不存在");
+        }
+        if (actor.getUserId().equals(userId)) {
+            throw new BusinessException("当前账号请使用修改密码功能");
+        }
+        User target = userDAO.findByIdForSecurity(userId);
+        if (target == null) {
+            throw new BusinessException("用户不存在");
+        }
+        String temporaryPassword;
+        String hash;
+        do {
+            temporaryPassword = PasswordUtil.generateTemporaryPassword();
+            try {
+                hash = PasswordUtil.hashPassword(temporaryPassword,
+                    target.getUsername(), target.getEmail(), target.getPhone());
+            } catch (BusinessException ex) {
+                hash = null;
+            }
+        } while (hash == null);
+        if (userDAO.updatePasswordSecurity(userId, hash, true, LocalDateTime.now()) != 1) {
+            throw new BusinessException("密码重置失败");
+        }
+        auditLogService.write(String.valueOf(actor.getUserId()), "ADMIN_OPERATION", "WARN",
+            "管理员重置用户密码，目标用户ID=" + userId, "RESET_USER_PASSWORD");
+        return temporaryPassword;
     }
 
     public void updateUser(User actor, User user) {
@@ -105,20 +192,33 @@ public class UserService {
 
     public void changeUserStatus(User actor, Long userId, int status) {
         requireAdmin(actor);
-        if (status != 0 && status != 1) {
-            throw new BusinessException("用户状态非法");
+        validateStatusChange(actor, userId, status);
+        if (userDAO.findById(userId) == null) {
+            throw new BusinessException("用户不存在");
         }
         userDAO.updateStatus(userId, status);
         auditLogService.write(String.valueOf(actor.getUserId()), "ADMIN_OPERATION", "INFO", "更新用户状态", "CHANGE_USER_STATUS");
     }
 
     public User findById(Long userId) {
-        return userDAO.findById(userId);
+        return withoutPasswordHash(userDAO.findById(userId));
     }
 
     public java.util.List<User> listUsers(User actor) {
         requireAdmin(actor);
-        return userDAO.findAll();
+        return userDAO.findAll().stream().map(UserService::withoutPasswordHash).toList();
+    }
+
+    static void validateStatusChange(User actor, Long userId, int status) {
+        if (userId == null) {
+            throw new BusinessException("用户不存在");
+        }
+        if (status != 0 && status != 1) {
+            throw new BusinessException("用户状态非法");
+        }
+        if (status == 0 && actor != null && userId.equals(actor.getUserId())) {
+            throw new BusinessException("不能禁用当前登录账号");
+        }
     }
 
     public static void requireAdmin(User actor) {
@@ -142,7 +242,7 @@ public class UserService {
         if (username == null || username.isBlank() || username.length() > 50) {
             throw new BusinessException("用户名长度不合法");
         }
-        PasswordUtil.validateStrength(password);
+        PasswordUtil.validateStrength(password, username, email, phone);
         validateEmail(email);
         validatePhone(phone);
     }
@@ -179,6 +279,13 @@ public class UserService {
 
     private boolean tooLong(String value, int maxLength) {
         return value != null && value.length() > maxLength;
+    }
+
+    private static User withoutPasswordHash(User user) {
+        if (user != null) {
+            user.setPasswordHash(null);
+        }
+        return user;
     }
 
 }

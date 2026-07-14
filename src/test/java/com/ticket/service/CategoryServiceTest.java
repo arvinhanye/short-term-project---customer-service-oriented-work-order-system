@@ -34,7 +34,7 @@ class CategoryServiceTest {
     }
 
     @Test
-    void rejectsMissingParentsAndCategoryCycles() {
+    void rejectsMissingParentsAndThirdLevelCategories() {
         FakeCategoryDAO dao = new FakeCategoryDAO();
         dao.add(category(1L, "一级", null));
         dao.add(category(2L, "二级", 1L));
@@ -44,6 +44,34 @@ class CategoryServiceTest {
             () -> service.createCategory(user("ADMIN"), "无效", 99L));
         Assertions.assertThrows(BusinessException.class,
             () -> service.updateCategory(user("ADMIN"), 1L, "一级", 2L));
+        Assertions.assertThrows(BusinessException.class,
+            () -> service.createCategory(user("ADMIN"), "三级", 2L));
+    }
+
+    @Test
+    void preventsFirstLevelCategoryWithChildrenFromBeingDemoted() {
+        FakeCategoryDAO dao = new FakeCategoryDAO();
+        dao.add(category(1L, "业务问题", null));
+        dao.add(category(2L, "退款", 1L));
+        dao.add(category(3L, "账户问题", null));
+        CategoryService service = new CategoryService(dao, new NoopAuditLogService());
+
+        Assertions.assertThrows(BusinessException.class,
+            () -> service.updateCategory(user("ADMIN"), 1L, "业务问题", 3L));
+        Assertions.assertNull(dao.findById(1L).getParentId());
+    }
+
+    @Test
+    void allowsLeafCategoryToMoveBetweenFirstLevelCategories() {
+        FakeCategoryDAO dao = new FakeCategoryDAO();
+        dao.add(category(1L, "业务问题", null));
+        dao.add(category(2L, "退款", 1L));
+        dao.add(category(3L, "账户问题", null));
+        CategoryService service = new CategoryService(dao, new NoopAuditLogService());
+
+        service.updateCategory(user("ADMIN"), 2L, "退款", 3L);
+
+        Assertions.assertEquals(3L, dao.findById(2L).getParentId());
     }
 
     @Test

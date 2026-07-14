@@ -39,10 +39,10 @@
 
 ## 4. 配套修正
 
-为了保证用户手册中的默认账号可以直接用于验收，已将 `src/main/resources/sql/mysql_init_data.sql` 中示例账号的 BCrypt 哈希统一更新为 jBCrypt 可识别的 `$2a$` 哈希，对应默认密码：
+为避免示例账号共用凭据，`src/main/resources/sql/mysql_init_data.sql` 已改为每个账号使用独立的 `$2a$` BCrypt 哈希，并强制首次登录换密。管理员验收入口为：
 
 ```text
-Ticket@123
+CedarFalcon#481（admin01，一次性临时密码）
 ```
 
 ## 5. 交付物清单
@@ -68,9 +68,9 @@ mvn clean package
 
 | 角色 | 用户名 | 密码 |
 | --- | --- | --- |
-| 管理员 | `admin01` | `Ticket@123` |
-| 普通用户 | `user01` | `Ticket@123` |
-| 禁用用户 | `user06` | `Ticket@123` |
+| 管理员 | `admin01` | `CedarFalcon#481`（首次登录强制换密） |
+| 普通用户 | `user01` | `HarborPine#846`（首次登录强制换密） |
+| 禁用用户 | `user06` | `PolarMeadow#769` |
 
 ## 7. Day09 提交记录
 

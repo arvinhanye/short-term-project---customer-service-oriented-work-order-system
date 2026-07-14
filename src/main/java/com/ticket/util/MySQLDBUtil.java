@@ -146,9 +146,13 @@ public final class MySQLDBUtil {
     private static HikariDataSource createDataSource(String role) {
         HikariConfig config = new HikariConfig();
         boolean readRole = "READ".equalsIgnoreCase(role);
-        config.setJdbcUrl(configValue(readRole ? "mysql.read.url" : "mysql.write.url", DBConfig.get("mysql.url")));
-        config.setUsername(configValue(readRole ? "mysql.read.username" : "mysql.write.username", DBConfig.get("mysql.username")));
-        config.setPassword(configValue(readRole ? "mysql.read.password" : "mysql.write.password", DBConfig.get("mysql.password")));
+        String jdbcUrl = configValue(readRole ? "mysql.read.url" : "mysql.write.url", DBConfig.get("mysql.url"));
+        String username = configValue(readRole ? "mysql.read.username" : "mysql.write.username", DBConfig.get("mysql.username"));
+        String password = configValue(readRole ? "mysql.read.password" : "mysql.write.password", DBConfig.get("mysql.password"));
+        validateCredentialConfiguration(role, username, password);
+        config.setJdbcUrl(jdbcUrl);
+        config.setUsername(username);
+        config.setPassword(password);
         config.setMaximumPoolSize(DBConfig.getInt(readRole ? "mysql.read.pool.maximumPoolSize" : "mysql.write.pool.maximumPoolSize",
             DBConfig.getInt("mysql.pool.maximumPoolSize", 10)));
         config.setMinimumIdle(DBConfig.getInt(readRole ? "mysql.read.pool.minimumIdle" : "mysql.write.pool.minimumIdle",
@@ -166,6 +170,16 @@ public final class MySQLDBUtil {
     private static String configValue(String key, String defaultValue) {
         String value = DBConfig.get(key);
         return value == null || value.isBlank() ? defaultValue : value;
+    }
+
+    private static void validateCredentialConfiguration(String role, String username, String password) {
+        if (username == null || username.isBlank() || password == null || password.isBlank()) {
+            throw new IllegalStateException(role + " 数据库凭据未配置；请设置 TICKET_MYSQL_USERNAME/TICKET_MYSQL_PASSWORD，"
+                + "或分别设置 TICKET_MYSQL_" + role + "_USERNAME/TICKET_MYSQL_" + role + "_PASSWORD");
+        }
+        if ("root".equalsIgnoreCase(username.trim())) {
+            throw new IllegalStateException("应用禁止使用 MySQL root 账号，请配置最小权限的专用数据库账号");
+        }
     }
 
     private static void closeDataSource(HikariDataSource dataSource, String role) {

@@ -58,6 +58,20 @@ if not exist "%JAR_PATH%" (
     goto pause_fail
 )
 
+if "%TICKET_MYSQL_USERNAME%"=="" (
+    echo 启动失败：请先设置环境变量 TICKET_MYSQL_USERNAME 和 TICKET_MYSQL_PASSWORD。
+    echo 数据库账号必须是最小权限的专用账号，不能使用 root。
+    goto pause_fail
+)
+if /I "%TICKET_MYSQL_USERNAME%"=="root" (
+    echo 启动失败：应用禁止使用 MySQL root，请配置专用数据库账号。
+    goto pause_fail
+)
+if "%TICKET_MYSQL_PASSWORD%"=="" (
+    echo 启动失败：TICKET_MYSQL_PASSWORD 不能为空。
+    goto pause_fail
+)
+
 echo 检查 MySQL：%MYSQL_HOST%:%MYSQL_PORT%
 powershell -NoProfile -Command "$c=New-Object Net.Sockets.TcpClient; try { $r=$c.BeginConnect('%MYSQL_HOST%',%MYSQL_PORT%,$null,$null); if (-not $r.AsyncWaitHandle.WaitOne(1500,$false)) { exit 1 }; $c.EndConnect($r); exit 0 } catch { exit 1 } finally { $c.Close() }" >nul 2>nul
 if errorlevel 1 (

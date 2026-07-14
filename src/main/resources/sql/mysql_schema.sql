@@ -28,12 +28,17 @@ CREATE TABLE users (
     phone VARCHAR(20),
     role ENUM('ADMIN', 'USER') NOT NULL,
     status TINYINT NOT NULL DEFAULT 1,
+    failed_login_attempts INT NOT NULL DEFAULT 0,
+    locked_until DATETIME NULL,
+    must_change_password TINYINT NOT NULL DEFAULT 0,
+    password_changed_at DATETIME NULL,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     INDEX idx_users_username (username),
     INDEX idx_users_email (email),
     INDEX idx_users_role (role),
-    INDEX idx_users_status (status)
+    INDEX idx_users_status (status),
+    INDEX idx_users_locked_until (locked_until)
 );
 
 CREATE TABLE categories (

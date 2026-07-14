@@ -16,7 +16,7 @@
 - `BusinessService`：工单创建、我的工单分页、详情聚合、客户回复、客服回复、内部备注、评价、状态流转、客服分配。
 - `ItemDAO`：工单主数据写入、查询、标题/分类更新、分页搜索。
 - `OrderDAO`：订单/记录写入、按用户和状态分页、按工单查询、状态更新。
-- `CategoryDAO`：分类查询、增删改、子分类和工单占用统计。
+- `CategoryDAO`：分类查询、增删改、二级分类和工单占用统计。
 - `RecommendService`：根据用户最近工单推荐常用分类。
 - `StatisticsService`：MySQL 存储过程报表和 MongoDB 聚合统计。
 
