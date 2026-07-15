@@ -1,10 +1,14 @@
 package com.ticket.service;
 
 import com.ticket.dao.mysql.CategoryDAO;
+import com.ticket.dto.CategoryOverviewDTO;
 import com.ticket.exception.BusinessException;
 import com.ticket.model.Category;
 import com.ticket.model.User;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /** Centralizes authorization and integrity rules for administrator category management. */
 public class CategoryService {
@@ -22,8 +26,19 @@ public class CategoryService {
     }
 
     public List<Category> listCategories(User actor) {
-        UserService.requireAdmin(actor);
+        UserService.requireBusinessAdmin(actor);
         return categoryDAO.findAll();
+    }
+
+    public List<CategoryOverviewDTO> listCategoryOverview(User actor) {
+        UserService.requireBusinessAdmin(actor);
+        List<CategoryOverviewDTO> categories = categoryDAO.findManagementOverview();
+        Map<String, List<CategoryOverviewDTO>> bySiblingName = categories.stream().collect(Collectors.groupingBy(
+            category -> (category.getParentId() == null ? "ROOT" : category.getParentId()) + "\u0000"
+                + category.getName().trim().toLowerCase(Locale.ROOT)));
+        bySiblingName.values().stream().filter(group -> group.size() > 1)
+            .forEach(group -> group.forEach(category -> category.setDuplicateName(true)));
+        return categories;
     }
 
     /** Returns categories that an authenticated user may select while creating a ticket. */
@@ -33,15 +48,16 @@ public class CategoryService {
     }
 
     public long createCategory(User actor, String name, Long parentId) {
-        UserService.requireAdmin(actor);
+        UserService.requireBusinessAdmin(actor);
         Category category = newCategory(name, parentId);
+        validateUniqueName(null, category.getName(), parentId);
         long categoryId = categoryDAO.insert(category);
         audit(actor, "新增分类 " + categoryId, "CREATE_CATEGORY");
         return categoryId;
     }
 
     public void updateCategory(User actor, Long categoryId, String name, Long parentId) {
-        UserService.requireAdmin(actor);
+        UserService.requireBusinessAdmin(actor);
         if (categoryId == null || categoryDAO.findById(categoryId) == null) {
             throw new BusinessException("分类不存在");
         }
@@ -53,12 +69,13 @@ public class CategoryService {
         }
         Category category = newCategory(name, parentId);
         category.setCategoryId(categoryId);
+        validateUniqueName(categoryId, category.getName(), parentId);
         categoryDAO.update(category);
         audit(actor, "更新分类 " + categoryId, "UPDATE_CATEGORY");
     }
 
     public void deleteCategory(User actor, Long categoryId) {
-        UserService.requireAdmin(actor);
+        UserService.requireBusinessAdmin(actor);
         if (categoryId == null || categoryDAO.findById(categoryId) == null) {
             throw new BusinessException("分类不存在");
         }
@@ -90,6 +107,12 @@ public class CategoryService {
         }
         if (parent.getParentId() != null) {
             throw new BusinessException("只能选择一级分类作为父分类，系统最多支持两级分类");
+        }
+    }
+
+    private void validateUniqueName(Long excludedCategoryId, String name, Long parentId) {
+        if (categoryDAO.existsSiblingName(excludedCategoryId, parentId, name)) {
+            throw new BusinessException("同一层级下已存在同名分类");
         }
     }
 

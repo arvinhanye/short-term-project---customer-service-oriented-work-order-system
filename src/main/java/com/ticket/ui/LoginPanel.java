@@ -4,6 +4,7 @@ import com.ticket.exception.BusinessException;
 import com.ticket.model.User;
 import com.ticket.service.UserService;
 import com.ticket.ui.theme.AppTheme;
+import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
 import java.awt.Color;
@@ -24,16 +25,23 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.Icon;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPasswordField;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
+import javax.swing.JToggleButton;
+import javax.swing.text.AbstractDocument;
+import javax.swing.text.AttributeSet;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DocumentFilter;
+import javax.swing.text.JTextComponent;
 
 public class LoginPanel extends JPanel {
+    private static final String PASSWORD_TOGGLE_PROPERTY = "login-password-toggle";
     private static final Color AUTH_PAGE = new Color(226, 233, 244);
     private static final Color AUTH_WORKSPACE = new Color(247, 249, 252);
     private static final Color AUTH_BORDER = new Color(196, 207, 223);
@@ -60,6 +68,8 @@ public class LoginPanel extends JPanel {
 
     public LoginPanel(MainFrame mainFrame) {
         this.mainFrame = mainFrame;
+        installWhitespaceIgnoringFilter(usernameField);
+        installWhitespaceIgnoringFilter(passwordField);
         setLayout(new BorderLayout());
         setBackground(AUTH_PAGE);
         authCards.setBackground(AUTH_WORKSPACE);
@@ -73,6 +83,49 @@ public class LoginPanel extends JPanel {
         add(buildAuthPage(shell), BorderLayout.CENTER);
         installKeyboardActions();
         showLogin();
+    }
+
+    private void installWhitespaceIgnoringFilter(JTextComponent field) {
+        if (field.getDocument() instanceof AbstractDocument document) {
+            document.setDocumentFilter(new DocumentFilter() {
+                @Override
+                public void insertString(FilterBypass bypass, int offset, String text, AttributeSet attributes)
+                        throws BadLocationException {
+                    String filtered = removeWhitespace(text);
+                    if (!filtered.isEmpty()) {
+                        super.insertString(bypass, offset, filtered, attributes);
+                    }
+                }
+
+                @Override
+                public void replace(FilterBypass bypass, int offset, int length, String text,
+                                    AttributeSet attributes) throws BadLocationException {
+                    if (text == null) {
+                        super.replace(bypass, offset, length, null, attributes);
+                        return;
+                    }
+                    if (text.isEmpty()) {
+                        super.replace(bypass, offset, length, "", attributes);
+                        return;
+                    }
+                    String filtered = removeWhitespace(text);
+                    if (!filtered.isEmpty()) {
+                        super.replace(bypass, offset, length, filtered, attributes);
+                    }
+                }
+            });
+        }
+    }
+
+    private String removeWhitespace(String text) {
+        if (text == null || text.isEmpty()) {
+            return "";
+        }
+        StringBuilder filtered = new StringBuilder(text.length());
+        text.codePoints()
+            .filter(codePoint -> !Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint))
+            .forEach(filtered::appendCodePoint);
+        return filtered.toString();
     }
 
     private JPanel buildAuthPage(JPanel shell) {
@@ -226,10 +279,10 @@ public class LoginPanel extends JPanel {
         gbc.gridwidth = 1;
         gbc.insets = new Insets(7, 8, 7, 8);
 
-        addField(formPanel, "用户名", usernameField, 1, gbc);
-        addField(formPanel, "密码", passwordField, 2, gbc);
         styleAuthInput(usernameField);
         styleAuthInput(passwordField);
+        addField(formPanel, "用户名", usernameField, 1, gbc);
+        addField(formPanel, "密码", passwordInput(passwordField), 2, gbc);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         actions.setOpaque(false);
@@ -269,15 +322,15 @@ public class LoginPanel extends JPanel {
         gbc.gridwidth = 1;
         gbc.insets = new Insets(7, 8, 7, 8);
 
-        addField(formPanel, "用户名", registerUsernameField, 1, gbc);
-        addField(formPanel, "密码", registerPasswordField, 2, gbc);
-        addField(formPanel, "确认密码", confirmPasswordField, 3, gbc);
-        addField(formPanel, "邮箱", emailField, 4, gbc);
-        addField(formPanel, "手机号", phoneField, 5, gbc);
         for (JComponent component : new JComponent[]{registerUsernameField,
             registerPasswordField, confirmPasswordField, emailField, phoneField}) {
             styleAuthInput(component);
         }
+        addField(formPanel, "用户名", registerUsernameField, 1, gbc);
+        addField(formPanel, "密码", passwordInput(registerPasswordField), 2, gbc);
+        addField(formPanel, "确认密码", passwordInput(confirmPasswordField), 3, gbc);
+        addField(formPanel, "邮箱", emailField, 4, gbc);
+        addField(formPanel, "手机号", phoneField, 5, gbc);
 
         JLabel passwordHint = AppTheme.muted("12–64 位，包含大小写字母、数字和特殊字符");
         gbc.gridx = 0;
@@ -327,6 +380,85 @@ public class LoginPanel extends JPanel {
             BorderFactory.createEmptyBorder(6, 9, 6, 9)));
     }
 
+    private JComponent passwordInput(JPasswordField field) {
+        char hiddenEchoChar = field.getEchoChar();
+        field.setBorder(BorderFactory.createEmptyBorder(6, 9, 6, 4));
+
+        JToggleButton toggle = new JToggleButton();
+        toggle.setIcon(new EyeIcon(false));
+        toggle.setSelectedIcon(new EyeIcon(true));
+        toggle.setToolTipText("显示密码");
+        toggle.setPreferredSize(new Dimension(38, 36));
+        toggle.setBorder(BorderFactory.createEmptyBorder());
+        toggle.setContentAreaFilled(false);
+        toggle.setFocusPainted(false);
+        toggle.setFocusable(false);
+        toggle.setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.HAND_CURSOR));
+        toggle.getAccessibleContext().setAccessibleName("显示密码");
+        toggle.addActionListener(event -> {
+            boolean visible = toggle.isSelected();
+            field.setEchoChar(visible ? (char) 0 : hiddenEchoChar);
+            String action = visible ? "隐藏密码" : "显示密码";
+            toggle.setToolTipText(action);
+            toggle.getAccessibleContext().setAccessibleName(action);
+        });
+        toggle.setEnabled(field.isEnabled());
+        field.addPropertyChangeListener("enabled", event -> toggle.setEnabled(field.isEnabled()));
+        field.putClientProperty(PASSWORD_TOGGLE_PROPERTY, toggle);
+
+        JPanel input = new JPanel(new BorderLayout());
+        input.setBackground(Color.WHITE);
+        input.setBorder(BorderFactory.createLineBorder(new Color(160, 174, 194)));
+        input.add(field, BorderLayout.CENTER);
+        input.add(toggle, BorderLayout.EAST);
+        return input;
+    }
+
+    private void hidePassword(JPasswordField field) {
+        Object value = field.getClientProperty(PASSWORD_TOGGLE_PROPERTY);
+        if (value instanceof JToggleButton toggle && toggle.isSelected()) {
+            toggle.doClick(0);
+        }
+    }
+
+    private static final class EyeIcon implements Icon {
+        private final boolean crossed;
+
+        private EyeIcon(boolean crossed) {
+            this.crossed = crossed;
+        }
+
+        @Override
+        public int getIconWidth() {
+            return 20;
+        }
+
+        @Override
+        public int getIconHeight() {
+            return 16;
+        }
+
+        @Override
+        public void paintIcon(java.awt.Component component, Graphics graphics, int x, int y) {
+            Graphics2D graphics2D = (Graphics2D) graphics.create();
+            try {
+                graphics2D.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+                graphics2D.setColor(component.isEnabled() ? AppTheme.MUTED : new Color(170, 174, 181));
+                graphics2D.setStroke(new BasicStroke(1.6f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+                graphics2D.drawArc(x + 1, y + 2, 18, 12, 18, 144);
+                graphics2D.drawArc(x + 1, y + 2, 18, 12, 198, 144);
+                graphics2D.fillOval(x + 8, y + 6, 4, 4);
+                if (crossed) {
+                    graphics2D.setColor(AppTheme.MUTED);
+                    graphics2D.drawLine(x + 2, y + 1, x + 18, y + 15);
+                }
+            } finally {
+                graphics2D.dispose();
+            }
+        }
+    }
+
     private void addField(JPanel panel, String label, java.awt.Component field, int row,
                           GridBagConstraints gbc) {
         gbc.gridx = 0;
@@ -365,14 +497,17 @@ public class LoginPanel extends JPanel {
     }
 
     private void showLogin() {
+        if (registering) {
+            clearRegisterForm();
+        }
         registering = false;
         authLayout.show(authCards, "login");
         SwingUtilities.invokeLater(usernameField::requestFocusInWindow);
     }
 
     private void showRegister() {
+        clearRegisterForm();
         registering = true;
-        registerStatusLabel.setText(" ");
         authLayout.show(authCards, "register");
         SwingUtilities.invokeLater(registerUsernameField::requestFocusInWindow);
     }
@@ -409,7 +544,6 @@ public class LoginPanel extends JPanel {
                     String message = cause instanceof BusinessException ? cause.getMessage() : "登录失败，请稍后重试";
                     statusLabel.setForeground(AppTheme.DANGER);
                     statusLabel.setText(message);
-                    JOptionPane.showMessageDialog(LoginPanel.this, message, "提示", JOptionPane.WARNING_MESSAGE);
                 } finally {
                     setLoginLoading(false, statusLabel.getText());
                 }
@@ -423,7 +557,6 @@ public class LoginPanel extends JPanel {
         if (!Arrays.equals(passwordChars, confirmChars)) {
             Arrays.fill(passwordChars, '\0');
             Arrays.fill(confirmChars, '\0');
-            confirmPasswordField.setText("");
             registerStatusLabel.setForeground(AppTheme.DANGER);
             registerStatusLabel.setText("两次输入的密码不一致");
             confirmPasswordField.requestFocusInWindow();
@@ -493,6 +626,8 @@ public class LoginPanel extends JPanel {
     }
 
     private void clearRegisterForm() {
+        hidePassword(registerPasswordField);
+        hidePassword(confirmPasswordField);
         registerUsernameField.setText("");
         registerPasswordField.setText("");
         confirmPasswordField.setText("");
@@ -503,6 +638,7 @@ public class LoginPanel extends JPanel {
 
     /** 清空上一次会话的凭据，供工作台退出后切换账号。 */
     public void prepareForLogin() {
+        hidePassword(passwordField);
         usernameField.setText("");
         passwordField.setText("");
         statusLabel.setText(" ");

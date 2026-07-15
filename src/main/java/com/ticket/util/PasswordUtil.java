@@ -77,6 +77,10 @@ public final class PasswordUtil {
         if (password == null || length < MIN_PASSWORD_LENGTH || length > MAX_PASSWORD_LENGTH) {
             throw new BusinessException("密码长度需为 12 到 64 位");
         }
+        if (password.codePoints().anyMatch(codePoint -> Character.isWhitespace(codePoint)
+                || Character.isSpaceChar(codePoint))) {
+            throw new BusinessException("密码不能包含空格或其他空白字符");
+        }
         if (password.getBytes(StandardCharsets.UTF_8).length > MAX_BCRYPT_BYTES) {
             throw new BusinessException("当前 BCrypt 架构下密码 UTF-8 编码不能超过 72 字节");
         }

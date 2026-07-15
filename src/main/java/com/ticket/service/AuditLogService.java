@@ -40,4 +40,32 @@ public class AuditLogService {
             retryService.recordSystemFailure(log, ex);
         }
     }
+
+    public void writePermissionChange(String actorUserId, String targetUserId, String beforeRole,
+                                      String afterRole, String reason, String operation) {
+        SystemLog log = new SystemLog();
+        log.setUserId(actorUserId);
+        log.setLogType("PERMISSION_CHANGE");
+        log.setLogLevel("WARN");
+        log.setMessage("操作者=" + actorUserId + "，目标账号=" + targetUserId
+            + "，修改前角色=" + (beforeRole == null ? "无" : beforeRole)
+            + "，修改后角色=" + (afterRole == null ? "无" : afterRole)
+            + "，原因=" + reason);
+        SystemLog.ActionDetail detail = new SystemLog.ActionDetail();
+        detail.setIp("127.0.0.1");
+        detail.setOperation(operation);
+        detail.setTargetUserId(targetUserId);
+        detail.setBeforeRole(beforeRole);
+        detail.setAfterRole(afterRole);
+        detail.setReason(reason);
+        log.setActionDetail(detail);
+        log.setTimestamp(Instant.now());
+        LOGGER.info("PERMISSION_AUDIT actor={} target={} before={} after={} operation={} reason={}",
+            actorUserId, targetUserId, beforeRole, afterRole, operation, reason);
+        try {
+            systemLogDAO.insert(log);
+        } catch (Exception ex) {
+            retryService.recordSystemFailure(log, ex);
+        }
+    }
 }

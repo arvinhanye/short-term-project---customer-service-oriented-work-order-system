@@ -17,6 +17,10 @@ public class CommentDAO extends MongoBaseDAO {
         collection("comments").insertOne(toDocument(comment));
     }
 
+    public void deleteByEventId(String eventId) {
+        collection("comments").deleteOne(Filters.eq("event_id", eventId));
+    }
+
     public List<Comment> findByItemId(String itemId, boolean includeInternal) {
         var filter = includeInternal
             ? Filters.eq("item_id", itemId)
@@ -125,6 +129,7 @@ public class CommentDAO extends MongoBaseDAO {
     private Document toDocument(Comment comment) {
         Instant createdAt = comment.getCreatedAt() == null ? Instant.now() : comment.getCreatedAt();
         return new Document("user_id", comment.getUserId())
+            .append("event_id", comment.getEventId())
             .append("item_id", comment.getItemId())
             .append("content", comment.getContent())
             .append("rating", comment.getRating() == null ? "" : comment.getRating())
@@ -134,6 +139,7 @@ public class CommentDAO extends MongoBaseDAO {
 
     private Comment fromDocument(Document document) {
         Comment comment = new Comment();
+        comment.setEventId(document.getString("event_id"));
         comment.setUserId(document.getString("user_id"));
         comment.setItemId(document.getString("item_id"));
         comment.setContent(document.getString("content"));

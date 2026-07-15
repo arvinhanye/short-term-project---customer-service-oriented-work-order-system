@@ -7,6 +7,7 @@ import com.ticket.model.ItemDetail;
 import com.ticket.model.Order;
 import com.ticket.model.Profile;
 import com.ticket.model.User;
+import com.ticket.model.TicketHistory;
 import java.util.ArrayList;
 import java.util.List;
 import org.bson.Document;
@@ -20,6 +21,7 @@ public class CrossTicketDTO {
     private ItemDetail itemDetail;
     private List<Comment> comments = new ArrayList<>();
     private List<Document> actionLogs = new ArrayList<>();
+    private List<TicketHistory> histories = new ArrayList<>();
     private long commentCount;
     private long internalNoteCount;
     private long actionCount;
@@ -88,6 +90,14 @@ public class CrossTicketDTO {
 
     public void setActionLogs(List<Document> actionLogs) {
         this.actionLogs = actionLogs;
+    }
+
+    public List<TicketHistory> getHistories() {
+        return histories;
+    }
+
+    public void setHistories(List<TicketHistory> histories) {
+        this.histories = histories;
     }
 
     public long getCommentCount() {

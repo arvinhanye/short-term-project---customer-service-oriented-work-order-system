@@ -12,6 +12,8 @@ import java.util.List;
 import javax.sql.DataSource;
 
 public class UserDAO extends BaseDAO {
+    private static final String PUBLIC_COLUMNS = "user_id, username, email, phone, role, status, "
+        + "failed_login_attempts, locked_until, must_change_password, password_changed_at, created_at, updated_at";
     public UserDAO() {
         super();
     }
@@ -53,6 +55,19 @@ public class UserDAO extends BaseDAO {
         return query("SELECT * FROM users ORDER BY user_id DESC", null, this::mapUser);
     }
 
+    /** 管理列表不读取密码哈希，减少传输与敏感数据在内存中的停留。 */
+    public List<User> findAllPublic() {
+        return query("SELECT " + PUBLIC_COLUMNS + " FROM users ORDER BY user_id DESC",
+            null, this::mapPublicUser);
+    }
+
+    /** 工单分配只查询启用的 ADMIN，避免读取整张用户表后在 Java 中过滤。 */
+    public List<User> findActiveAdminsPublic() {
+        return query("SELECT " + PUBLIC_COLUMNS
+                + " FROM users WHERE role = 'ADMIN' AND status = 1 ORDER BY user_id DESC",
+            null, this::mapPublicUser);
+    }
+
     public List<User> findByRole(String role) {
         return query("SELECT * FROM users WHERE role = ? ORDER BY user_id DESC",
             statement -> statement.setString(1, role), this::mapUser);
@@ -61,6 +76,12 @@ public class UserDAO extends BaseDAO {
     public List<User> findByStatus(int status) {
         return query("SELECT * FROM users WHERE status = ? ORDER BY user_id DESC",
             statement -> statement.setInt(1, status), this::mapUser);
+    }
+
+    public long countActiveByRole(String role) {
+        Long count = queryOneOnWrite("SELECT COUNT(*) AS total FROM users WHERE role = ? AND status = 1",
+            statement -> statement.setString(1, role), resultSet -> resultSet.getLong("total"));
+        return count == null ? 0 : count;
     }
 
     public long insert(Connection connection, User user) throws Exception {
@@ -168,16 +189,84 @@ public class UserDAO extends BaseDAO {
             });
     }
 
+    /**
+     * 在同一事务内锁定治理账号并更新状态，避免并发操作禁用最后一个有效 ROOT。
+     * 返回 -1 表示触发最后 ROOT 保护，0 表示目标不存在，1 表示更新成功。
+     */
+    public int updateStatusWithRootProtection(Long userId, int status) {
+        return updateStatusWithRootProtection(userId, status, null);
+    }
+
+    public int updateStatusWithRootProtection(Long userId, int status, String expectedRole) {
+        return executeTransactionCallback(connection -> {
+            int activeRoots = status == 0 && "ROOT".equals(expectedRole)
+                ? lockAndCountActiveRoots(connection) : -1;
+            User target = findByIdForUpdate(connection, userId);
+            if (target == null) {
+                return 0;
+            }
+            if (expectedRole != null && !expectedRole.equals(target.getRole())) {
+                return -2;
+            }
+            if (status == 0 && "ROOT".equals(target.getRole()) && Integer.valueOf(1).equals(target.getStatus())) {
+                if ((activeRoots < 0 ? lockAndCountActiveRoots(connection) : activeRoots) <= 1) {
+                    return -1;
+                }
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE users SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?")) {
+                statement.setInt(1, status);
+                statement.setLong(2, userId);
+                return statement.executeUpdate();
+            }
+        });
+    }
+
+    /** 与状态更新使用相同的行锁策略，避免并发降级最后一个有效 ROOT。 */
+    public int updateRoleWithRootProtection(Long userId, String newRole) {
+        return updateRoleWithRootProtection(userId, newRole, null);
+    }
+
+    public int updateRoleWithRootProtection(Long userId, String newRole, String expectedRole) {
+        return executeTransactionCallback(connection -> {
+            int activeRoots = "ROOT".equals(expectedRole) && !"ROOT".equals(newRole)
+                ? lockAndCountActiveRoots(connection) : -1;
+            User target = findByIdForUpdate(connection, userId);
+            if (target == null) {
+                return 0;
+            }
+            if (expectedRole != null && !expectedRole.equals(target.getRole())) {
+                return -2;
+            }
+            if ("ROOT".equals(target.getRole()) && !"ROOT".equals(newRole)
+                    && Integer.valueOf(1).equals(target.getStatus())
+                    && (activeRoots < 0 ? lockAndCountActiveRoots(connection) : activeRoots) <= 1) {
+                return -1;
+            }
+            try (PreparedStatement statement = connection.prepareStatement(
+                    "UPDATE users SET role = ?, updated_at = CURRENT_TIMESTAMP WHERE user_id = ?")) {
+                statement.setString(1, newRole);
+                statement.setLong(2, userId);
+                return statement.executeUpdate();
+            }
+        });
+    }
+
     public int deleteById(Long userId) {
         return update("DELETE FROM users WHERE user_id = ?",
             statement -> statement.setLong(1, userId));
     }
 
     private User mapUser(java.sql.ResultSet resultSet) throws java.sql.SQLException {
+        User user = mapPublicUser(resultSet);
+        user.setPasswordHash(resultSet.getString("password_hash"));
+        return user;
+    }
+
+    private User mapPublicUser(java.sql.ResultSet resultSet) throws java.sql.SQLException {
         User user = new User();
         user.setUserId(resultSet.getLong("user_id"));
         user.setUsername(resultSet.getString("username"));
-        user.setPasswordHash(resultSet.getString("password_hash"));
         user.setEmail(resultSet.getString("email"));
         user.setPhone(resultSet.getString("phone"));
         user.setRole(resultSet.getString("role"));
@@ -191,6 +280,28 @@ public class UserDAO extends BaseDAO {
         user.setCreatedAt(resultSet.getTimestamp("created_at").toLocalDateTime());
         user.setUpdatedAt(resultSet.getTimestamp("updated_at").toLocalDateTime());
         return user;
+    }
+
+    private User findByIdForUpdate(Connection connection, Long userId) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM users WHERE user_id = ? FOR UPDATE")) {
+            statement.setLong(1, userId);
+            try (var resultSet = statement.executeQuery()) {
+                return resultSet.next() ? mapUser(resultSet) : null;
+            }
+        }
+    }
+
+    private int lockAndCountActiveRoots(Connection connection) throws Exception {
+        int count = 0;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT user_id FROM users WHERE role = 'ROOT' AND status = 1 FOR UPDATE");
+             var resultSet = statement.executeQuery()) {
+            while (resultSet.next()) {
+                count++;
+            }
+        }
+        return count;
     }
 
     private void setNullableTimestamp(PreparedStatement statement, int index, LocalDateTime value)

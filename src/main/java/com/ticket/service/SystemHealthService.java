@@ -15,7 +15,7 @@ public class SystemHealthService {
     private final OrderDAO orderDAO = new OrderDAO();
 
     public HealthCheckDTO runFullCheck(User actor) {
-        UserService.requireAdmin(actor);
+        UserService.requireAdministrator(actor);
         HealthCheckDTO result = new HealthCheckDTO();
         check(result, "MySQL 写库连接", this::checkMysqlWriteConnection);
         check(result, "MySQL 读库连接", this::checkMysqlReadConnection);

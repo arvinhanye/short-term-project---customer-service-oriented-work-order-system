@@ -7,6 +7,7 @@ import com.ticket.model.Category;
 import com.ticket.model.Comment;
 import com.ticket.model.ItemDetail;
 import com.ticket.model.Profile;
+import com.ticket.model.TicketHistory;
 import com.ticket.model.User;
 import com.ticket.service.BusinessService;
 import com.ticket.service.CategoryService;
@@ -1087,7 +1088,6 @@ public class UserWorkbenchPanel extends JPanel {
                     ordersStatusLabel.setForeground(AppTheme.DANGER);
                     ordersStatusLabel.setText("工单列表加载失败，请检查数据库连接后重试。");
                     updatePageControls();
-                    JOptionPane.showMessageDialog(UserWorkbenchPanel.this, "加载工单失败", "提示", JOptionPane.WARNING_MESSAGE);
                 }
             }
         }.execute();
@@ -1319,22 +1319,36 @@ public class UserWorkbenchPanel extends JPanel {
         actions.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.BORDER));
         JButton refreshButton = new JButton("刷新");
         JButton replyButton = new JButton("追加回复");
+        JButton urgeButton = new JButton("催促处理");
         JButton rateButton = new JButton("评价");
         JButton closeButton = new JButton("关闭");
         AppTheme.secondary(refreshButton);
         AppTheme.primary(replyButton);
+        AppTheme.secondary(urgeButton);
         AppTheme.secondary(rateButton);
         AppTheme.secondary(closeButton);
         actions.add(refreshButton);
         actions.add(replyButton);
+        actions.add(urgeButton);
         actions.add(rateButton);
         actions.add(closeButton);
         dialog.add(actions, BorderLayout.SOUTH);
 
-        Runnable refreshDetail = () -> loadTicketDetail(itemId, detailArea);
+        replyButton.setEnabled(false);
+        urgeButton.setEnabled(false);
+        rateButton.setEnabled(false);
+        Runnable refreshDetail = () -> loadTicketDetail(
+            itemId, detailArea, summary, replyButton, urgeButton, rateButton);
         refreshButton.addActionListener(event -> refreshDetail.run());
         replyButton.addActionListener(event -> {
             if (addCustomerReply(itemId)) {
+                refreshDetail.run();
+                loadOrders();
+                loadHomeOverview();
+            }
+        });
+        urgeButton.addActionListener(event -> {
+            if (urgeTicket(itemId)) {
                 refreshDetail.run();
                 loadOrders();
                 loadHomeOverview();
@@ -1355,8 +1369,13 @@ public class UserWorkbenchPanel extends JPanel {
         dialog.setVisible(true);
     }
 
-    private void loadTicketDetail(Long itemId, JTextArea detailArea) {
+    private void loadTicketDetail(Long itemId, JTextArea detailArea, JLabel summary,
+                                  JButton replyButton, JButton urgeButton, JButton rateButton) {
         detailArea.setText("正在加载工单详情...");
+        summary.setText("正在加载最新状态…");
+        replyButton.setEnabled(false);
+        urgeButton.setEnabled(false);
+        rateButton.setEnabled(false);
         new SwingWorker<ItemDetailDTO, Void>() {
             @Override
             protected ItemDetailDTO doInBackground() {
@@ -1366,13 +1385,41 @@ public class UserWorkbenchPanel extends JPanel {
             @Override
             protected void done() {
                 try {
-                    detailArea.setText(formatTicketDetail(get()));
+                    ItemDetailDTO ticket = get();
+                    detailArea.setText(formatTicketDetail(ticket));
                     detailArea.setCaretPosition(0);
+                    Integer status = ticket.getOrder() == null ? null : ticket.getOrder().getStatus();
+                    ItemDetail.Metadata metadata = ticket.getItemDetail() == null
+                        ? null : ticket.getItemDetail().getMetadata();
+                    int reminderCount = metadata == null ? 0 : metadata.getReminderCount();
+                    summary.setText("状态：" + statusText(status) + " · 已催促 " + reminderCount + " 次");
+                    replyButton.setEnabled(!Integer.valueOf(3).equals(status) && !Integer.valueOf(4).equals(status));
+                    urgeButton.setEnabled(Integer.valueOf(0).equals(status) || Integer.valueOf(1).equals(status));
+                    rateButton.setEnabled(Integer.valueOf(2).equals(status) || Integer.valueOf(3).equals(status));
                 } catch (Exception ex) {
                     detailArea.setText("加载工单详情失败：" + ex.getMessage());
+                    summary.setText("详情加载失败");
                 }
             }
         }.execute();
+    }
+
+    private boolean urgeTicket(Long itemId) {
+        int confirm = JOptionPane.showConfirmDialog(this,
+            "确认催促工单 #" + itemId + "？\n每 30 分钟最多催促一次，管理员会看到催促次数和时间。",
+            "催促处理", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (confirm != JOptionPane.YES_OPTION) {
+            return false;
+        }
+        try {
+            businessService.urgeTicket(currentUser, itemId);
+            JOptionPane.showMessageDialog(this, "催促已提交，管理员会在工单列表中看到提醒。",
+                "催促成功", JOptionPane.INFORMATION_MESSAGE);
+            return true;
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            return false;
+        }
     }
 
     private boolean addCustomerReply(Long itemId) {
@@ -1444,11 +1491,26 @@ public class UserWorkbenchPanel extends JPanel {
             builder.append("优先级：")
                 .append(metadata == null ? "" : nullToEmpty(metadata.getPriority()))
                 .append('\n');
+            if (metadata != null) {
+                builder.append("处理归属：")
+                    .append(metadata.getAssignedAdminId() == null || metadata.getAssignedAdminId().isBlank()
+                        ? "等待管理员认领" : "已有管理员负责")
+                    .append('\n');
+                if (metadata.getTransferTargetAdminId() != null && !metadata.getTransferTargetAdminId().isBlank()) {
+                    builder.append("协作状态：管理员接手确认中").append('\n');
+                }
+                builder.append("催促次数：").append(metadata.getReminderCount()).append('\n');
+                builder.append("最近催促：")
+                    .append(metadata.getLastRemindedAt() == null ? "尚未催促"
+                        : TimeFormatUtil.format(metadata.getLastRemindedAt()))
+                    .append('\n');
+            }
             builder.append("\n描述：\n")
                 .append(nullToEmpty(detail.getDescription()))
                 .append('\n');
         }
 
+        appendUserTicketHistory(builder, ticket.getHistories());
         builder.append("\n沟通记录：\n");
         if (ticket.getComments() == null || ticket.getComments().isEmpty()) {
             builder.append("暂无沟通记录。\n");
@@ -1472,6 +1534,34 @@ public class UserWorkbenchPanel extends JPanel {
         return builder.toString();
     }
 
+    private void appendUserTicketHistory(StringBuilder builder, List<TicketHistory> histories) {
+        builder.append("\n工单进度：\n");
+        if (histories == null || histories.isEmpty()) {
+            builder.append("暂无进度记录\n");
+            return;
+        }
+        for (TicketHistory history : histories) {
+            builder.append("[").append(TimeFormatUtil.format(history.getOccurredAt())).append("] ")
+                .append(userHistoryText(history)).append('\n');
+        }
+    }
+
+    private String userHistoryText(TicketHistory history) {
+        return switch (history.getEventType()) {
+            case "TICKET_CREATED" -> "工单已创建";
+            case "MIGRATION_SNAPSHOT" -> "历史工单已接入进度追踪，当时状态：" + statusText(history.getToStatus());
+            case "TICKET_CLAIMED" -> "工单已由客服接单";
+            case "STATUS_CHANGED", "AUTO_CANCELLED", "BATCH_STATUS_CHANGED" -> "状态更新："
+                + statusText(history.getFromStatus()) + " → " + statusText(history.getToStatus());
+            case "REMINDER_SENT" -> "已提交催促";
+            case "CUSTOMER_REPLY_ADDED" -> "已追加回复";
+            case "ADMIN_REPLY_ADDED" -> "客服已回复";
+            case "RATING_SUBMITTED" -> "已提交评价";
+            case "CATEGORY_REASSIGNED" -> "工单分类已调整";
+            default -> "工单已更新";
+        };
+    }
+
     private String commentTypeText(Comment comment) {
         if (comment.getTags() == null || comment.getTags().isEmpty()) {
             return "";
@@ -1479,7 +1569,7 @@ public class UserWorkbenchPanel extends JPanel {
         String tag = comment.getTags().get(0);
         return switch (tag) {
             case "CUSTOMER_REPLY" -> "客户回复";
-            case "AGENT_REPLY" -> "客服回复";
+            case "ADMIN_REPLY" -> "客服回复";
             case "CUSTOMER_RATING" -> "客户评价";
             default -> tag;
         };

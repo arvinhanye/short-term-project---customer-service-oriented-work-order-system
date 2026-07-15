@@ -47,6 +47,13 @@ public class ItemDetail {
         private String priority;
         private String createdByUserId;
         private String assignedAdminId;
+        private String transferRequestId;
+        private String transferRequestedByAdminId;
+        private String transferTargetAdminId;
+        private String transferReason;
+        private Instant transferRequestedAt;
+        private int reminderCount;
+        private Instant lastRemindedAt;
         private String contactChannel;
         private Instant lastProcessedAt;
 
@@ -80,6 +87,62 @@ public class ItemDetail {
 
         public void setAssignedAdminId(String assignedAdminId) {
             this.assignedAdminId = assignedAdminId;
+        }
+
+        public String getTransferRequestId() {
+            return transferRequestId;
+        }
+
+        public void setTransferRequestId(String transferRequestId) {
+            this.transferRequestId = transferRequestId;
+        }
+
+        public String getTransferRequestedByAdminId() {
+            return transferRequestedByAdminId;
+        }
+
+        public void setTransferRequestedByAdminId(String transferRequestedByAdminId) {
+            this.transferRequestedByAdminId = transferRequestedByAdminId;
+        }
+
+        public String getTransferTargetAdminId() {
+            return transferTargetAdminId;
+        }
+
+        public void setTransferTargetAdminId(String transferTargetAdminId) {
+            this.transferTargetAdminId = transferTargetAdminId;
+        }
+
+        public String getTransferReason() {
+            return transferReason;
+        }
+
+        public void setTransferReason(String transferReason) {
+            this.transferReason = transferReason;
+        }
+
+        public Instant getTransferRequestedAt() {
+            return transferRequestedAt;
+        }
+
+        public void setTransferRequestedAt(Instant transferRequestedAt) {
+            this.transferRequestedAt = transferRequestedAt;
+        }
+
+        public int getReminderCount() {
+            return reminderCount;
+        }
+
+        public void setReminderCount(int reminderCount) {
+            this.reminderCount = Math.max(0, reminderCount);
+        }
+
+        public Instant getLastRemindedAt() {
+            return lastRemindedAt;
+        }
+
+        public void setLastRemindedAt(Instant lastRemindedAt) {
+            this.lastRemindedAt = lastRemindedAt;
         }
 
         public String getContactChannel() {

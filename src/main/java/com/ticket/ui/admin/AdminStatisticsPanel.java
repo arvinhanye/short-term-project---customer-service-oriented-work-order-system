@@ -24,7 +24,6 @@ import java.util.function.Supplier;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
 import javax.swing.JTable;
@@ -549,6 +548,7 @@ public class AdminStatisticsPanel extends JPanel {
     private void showLoadError(String title, Exception ex) {
         String message = title + "加载失败：" + rootMessage(ex);
         if (title.startsWith("月度报表")) {
+            monthlyStatusLabel.setForeground(AppTheme.DANGER);
             monthlyStatusLabel.setText(message);
             monthlyValueLabels.forEach((key, label) -> {
                 if (!"period".equals(key)) {
@@ -556,11 +556,12 @@ public class AdminStatisticsPanel extends JPanel {
                 }
             });
         } else if (title.startsWith("系统日志")) {
+            auditStatusLabel.setForeground(AppTheme.DANGER);
             auditStatusLabel.setText(message);
         } else {
+            aggregateStatusLabel.setForeground(AppTheme.DANGER);
             aggregateStatusLabel.setText(message);
         }
-        JOptionPane.showMessageDialog(this, message, "提示", JOptionPane.WARNING_MESSAGE);
     }
 
     @Override

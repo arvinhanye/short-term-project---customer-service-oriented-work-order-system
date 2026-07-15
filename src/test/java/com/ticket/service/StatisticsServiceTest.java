@@ -13,13 +13,17 @@ class StatisticsServiceTest {
     @Test
     void shouldAcceptSupportedStatusTransitions() {
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(0, 1));
-        Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(0, 2));
-        Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(0, 3));
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(0, 4));
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 2));
-        Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 3));
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 4));
         Assertions.assertDoesNotThrow(() -> BusinessService.validateStatusTransition(2, 3));
+    }
+
+    @Test
+    void shouldRejectStatusSkipping() {
+        Assertions.assertThrows(BusinessException.class, () -> BusinessService.validateStatusTransition(0, 2));
+        Assertions.assertThrows(BusinessException.class, () -> BusinessService.validateStatusTransition(0, 3));
+        Assertions.assertThrows(BusinessException.class, () -> BusinessService.validateStatusTransition(1, 3));
     }
 
     @Test

@@ -68,7 +68,8 @@ mvn clean package
 
 | 角色 | 用户名 | 密码 |
 | --- | --- | --- |
-| 管理员 | `admin01` | `CedarFalcon#481`（首次登录强制换密） |
+| 系统所有者 ROOT | `admin01` | `CedarFalcon#481`（首次登录强制换密） |
+| 管理员 ADMIN | `admin03` | `BusinessAdmin#583`（首次登录强制换密） |
 | 普通用户 | `user01` | `HarborPine#846`（首次登录强制换密） |
 | 禁用用户 | `user06` | `PolarMeadow#769` |
 

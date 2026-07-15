@@ -1,7 +1,7 @@
 const database = db.getSiblingDB("ticket_management_logs");
 
 const hanaUserId = "10011";
-const agentUserId = "10001";
+const adminUserId = "10001";
 
 const tickets = [
   {
@@ -13,19 +13,19 @@ const tickets = [
   {
     itemId: "9102",
     priority: "MEDIUM",
-    assignedAdminId: agentUserId,
+    assignedAdminId: adminUserId,
     description: "实名认证资料已经提交，但页面停留在审核中，需要测试处理中状态和客服回复时间线。"
   },
   {
     itemId: "9103",
     priority: "URGENT",
-    assignedAdminId: agentUserId,
+    assignedAdminId: adminUserId,
     description: "退款申请显示已完成，但银行卡未到账，需要测试已完成状态、金额展示和用户评价。"
   },
   {
     itemId: "9104",
     priority: "HIGH",
-    assignedAdminId: agentUserId,
+    assignedAdminId: adminUserId,
     description: "同一订单被扣款两次，希望确认多扣金额是否可退回，需要测试已关闭状态。"
   },
   {
@@ -43,13 +43,13 @@ const tickets = [
   {
     itemId: "9107",
     priority: "HIGH",
-    assignedAdminId: agentUserId,
+    assignedAdminId: adminUserId,
     description: "支付完成后订单状态仍显示待支付，需要测试处理中状态和搜索关键词“订单”。"
   },
   {
     itemId: "9108",
     priority: "URGENT",
-    assignedAdminId: agentUserId,
+    assignedAdminId: adminUserId,
     description: "支付成功后发票未生成，需要测试已完成状态、金额排序和评价记录。"
   }
 ];
@@ -67,6 +67,12 @@ tickets.forEach((ticket, index) => {
           priority: ticket.priority,
           created_by_user_id: hanaUserId,
           assigned_admin_id: ticket.assignedAdminId,
+          transfer_requested_by_admin_id: null,
+          transfer_target_admin_id: null,
+          transfer_reason: null,
+          transfer_requested_at: null,
+          reminder_count: 0,
+          last_reminded_at: null,
           contact_channel: "DESKTOP",
           last_processed_at: new Date(`2026-07-${String(index + 1).padStart(2, "0")}T08:00:00Z`)
         }
@@ -92,14 +98,14 @@ tickets.forEach((ticket, index) => {
 
   if (ticket.assignedAdminId) {
     database.comments.updateOne(
-      { item_id: ticket.itemId, tags: ["AGENT_REPLY"], user_id: agentUserId },
+      { item_id: ticket.itemId, tags: ["ADMIN_REPLY"], user_id: adminUserId },
       {
         $set: {
-          user_id: agentUserId,
+          user_id: adminUserId,
           item_id: ticket.itemId,
           content: `客服回复：已收到 Hana 关于 ${ticket.itemId} 的反馈，正在跟进处理。`,
           rating: "",
-          tags: ["AGENT_REPLY"],
+          tags: ["ADMIN_REPLY"],
           created_at: new Date(`2026-07-${String(index + 1).padStart(2, "0")}T03:10:00Z`)
         }
       },

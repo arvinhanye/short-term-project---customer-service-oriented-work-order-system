@@ -32,6 +32,8 @@ class SeedPasswordSecurityTest {
         Assertions.assertEquals(12, hashes.size());
         Assertions.assertEquals(12, new HashSet<>(hashes.values()).size());
         Assertions.assertTrue(PasswordUtil.matches("CedarFalcon#481", hashes.get("admin01")));
+        Assertions.assertTrue(PasswordUtil.matches("BusinessAdmin#583", hashes.get("admin03")));
+        Assertions.assertTrue(PasswordUtil.matches("ServiceAgent#742", hashes.get("admin04")));
         Assertions.assertTrue(PasswordUtil.matches("HarborPine#846", hashes.get("user01")));
         Assertions.assertTrue(PasswordUtil.matches("PolarMeadow#769", hashes.get("user06")));
         Assertions.assertTrue(sql.contains("must_change_password, password_changed_at"));

@@ -18,6 +18,8 @@ erDiagram
     categories ||--o{ categories : parent
     categories ||--o{ items : classifies
     items ||--|| orders : owns
+    items ||--o{ ticket_history : records
+    orders ||--o{ ticket_history : versions
 
     users {
         BIGINT user_id PK
@@ -61,7 +63,26 @@ erDiagram
         BIGINT item_id FK
         DECIMAL amount
         TINYINT status
+        BIGINT assigned_admin_id FK
+        CHAR transfer_request_id
+        BIGINT transfer_target_admin_id FK
+        INT reminder_count
+        BIGINT workflow_version
         DATETIME created_at
+    }
+
+    ticket_history {
+        BIGINT history_id PK
+        CHAR event_id UK
+        BIGINT item_id FK
+        BIGINT order_id FK
+        BIGINT event_seq UK
+        VARCHAR event_type
+        ENUM visibility
+        BIGINT actor_user_id
+        TINYINT from_status
+        TINYINT to_status
+        DATETIME occurred_at
     }
 
     system_log_import_records {
@@ -89,7 +110,7 @@ erDiagram
 | password_hash | VARCHAR(255) | NOT NULL | BCrypt 密码哈希 |
 | email | VARCHAR(100) | NOT NULL, UNIQUE | 邮箱 |
 | phone | VARCHAR(20) |  | 手机号 |
-| role | ENUM('ADMIN','USER') | NOT NULL | 用户角色 |
+| role | ENUM('ROOT','ADMIN','USER') | NOT NULL | 系统所有者、管理员、普通用户 |
 | status | TINYINT | NOT NULL, DEFAULT 1 | 1 启用，0 禁用 |
 | failed_login_attempts | INT | NOT NULL, DEFAULT 0 | 连续登录失败次数 |
 | locked_until | DATETIME | NULL | 临时登录保护截止时间 |
@@ -113,7 +134,7 @@ erDiagram
 
 ### 3.3 categories
 
-工单分类表，业务规则限定为严格两级：`parent_id` 为空时为一级分类；非空时为二级分类，且其父记录的 `parent_id` 必须为空。该跨行层级规则由 `CategoryService` 统一校验，外键继续保证父记录存在。
+工单分类表，业务规则限定为严格两级：`parent_id` 为空时为一级分类；非空时为二级分类，且其父记录的 `parent_id` 必须为空。该跨行层级规则和同层重名校验由 `CategoryService` 统一执行，外键继续保证父记录存在。历史三级测试分类通过 `mysql_category_cleanup.sql` 在事务内先迁移关联工单并追加 `CATEGORY_REASSIGNED` 历史，再删除空分类，不级联删除工单。
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -143,7 +164,7 @@ erDiagram
 
 ### 3.5 orders
 
-工单处理记录表，保存提交人、金额和业务状态。代码中沿用 `Order` 命名，业务语义为工单流转记录。
+工单处理记录表，保存提交人、金额、业务状态和当前工作流状态，是负责人、待确认转派和催促信息的权威数据源。MongoDB 同名元数据只作兼容镜像。
 
 | 字段 | 类型 | 约束 | 说明 |
 | --- | --- | --- | --- |
@@ -152,6 +173,15 @@ erDiagram
 | item_id | BIGINT | FK | 工单编号 |
 | amount | DECIMAL(10,2) | NOT NULL | 涉及金额 |
 | status | TINYINT | NOT NULL, DEFAULT 0 | 0 待处理，1 处理中，2 已完成，3 已关闭，4 已取消 |
+| assigned_admin_id | BIGINT | FK, NULL | 当前负责人；新工单为空 |
+| transfer_request_id | CHAR(36) | NULL | 待确认转派请求唯一编号，用于防止旧弹窗误操作新请求 |
+| transfer_requested_by | BIGINT | FK, NULL | 转派发起人 |
+| transfer_target_admin_id | BIGINT | FK, NULL | 目标管理员 |
+| transfer_reason | VARCHAR(200) | NULL | 转派原因 |
+| transfer_requested_at | DATETIME(3) | NULL | 转派发起时间 |
+| reminder_count | INT | NOT NULL, DEFAULT 0 | 用户催促次数 |
+| last_reminded_at | DATETIME(3) | NULL | 最近催促时间 |
+| workflow_version | BIGINT | NOT NULL | 工单事件序号和乐观锁版本 |
 | created_at | DATETIME | NOT NULL | 提交时间 |
 
 常用索引：
@@ -162,8 +192,27 @@ erDiagram
 | `idx_orders_user_created_at(user_id, created_at)` | 普通用户“我的工单”分页 |
 | `idx_orders_user_status_created_at(user_id, status, created_at)` | 普通用户按状态筛选分页 |
 | `idx_orders_status_created_at(status, created_at)` | 管理员按状态筛选分页 |
+| `idx_orders_assigned_status_created_at(assigned_admin_id, status, created_at)` | 按负责人和状态读取工作队列 |
+| `idx_orders_transfer_target_requested_at(transfer_target_admin_id, transfer_requested_at)` | 查询待本人确认的转派请求 |
 
-### 3.6 system_log_import_records
+### 3.6 ticket_history
+
+追加式工单历史账本。每次业务操作先锁定 `orders`，在同一 MySQL 事务中更新当前态并插入一条历史；`(item_id,event_seq)` 和 `event_id` 双重唯一，触发器禁止 UPDATE/DELETE。
+
+| 字段 | 说明 |
+| --- | --- |
+| event_type | 创建、认领、转派申请/接受/拒绝/撤销、回复、备注、催促、评价、状态变化等事件类型 |
+| visibility | `PUBLIC` 用户可见，`STAFF_ONLY` 仅 ADMIN，`AUDIT_ONLY` 仅审计用途 |
+| actor_* / target_user_id | 操作者快照和目标账号，账号后续改名也不影响历史解释 |
+| from_status / to_status | 状态变化前后值 |
+| from_admin_id / to_admin_id | 负责人变化前后值 |
+| source_type / source_id | 关联评论事件或转派请求，支持跨库核对和幂等 |
+| event_payload | 可扩展 JSON 快照，不保存回复正文等敏感内容 |
+| occurred_at | 业务发生时间 |
+
+旧工单只回填 `MIGRATION_SNAPSHOT`，明确标记迁移前历史不完整，不伪造无法重建的事件。
+
+### 3.7 system_log_import_records
 
 系统日志批量导入表，用于通过 JDBC `PreparedStatement.addBatch()` 和 `executeBatch()` 批量导入审计日志归档或测试日志数据。MongoDB `system_logs` 仍是在线审计查询的主存储，本表用于满足关系库批处理导入和验收演示场景。
 
@@ -196,6 +245,7 @@ erDiagram
 | sp_batch_update_order_status | 按时间批量更新指定状态的工单 |
 | trg_order_status_sync | 工单状态变更后同步更新工单主记录状态和更新时间 |
 | trg_item_update_time | 工单主记录更新前自动刷新 `updated_at` |
+| trg_ticket_history_no_update / no_delete | 保证工单历史只能追加，不能覆盖或删除 |
 
 ## 5. MongoDB 集合设计
 
@@ -203,7 +253,7 @@ MongoDB 数据库名：`ticket_management_logs`。
 
 ### 5.1 item_details
 
-保存工单长文本详情、附件地址和处理元数据。`item_id` 建唯一索引，与 MySQL `items.item_id` 形成逻辑一对一关系。
+保存工单长文本详情、附件地址和工作流兼容镜像。`item_id` 建唯一索引，与 MySQL `items.item_id` 形成逻辑一对一关系；分配、转派和催促的判定必须读取 MySQL `orders`。
 
 ```json
 {
@@ -215,6 +265,13 @@ MongoDB 数据库名：`ticket_management_logs`。
     "priority": "HIGH",
     "created_by_user_id": "10004",
     "assigned_admin_id": "10001",
+    "transfer_request_id": null,
+    "transfer_requested_by_admin_id": null,
+    "transfer_target_admin_id": null,
+    "transfer_reason": null,
+    "transfer_requested_at": null,
+    "reminder_count": 0,
+    "last_reminded_at": null,
     "contact_channel": "DESKTOP",
     "last_processed_at": "2026-03-01T09:00:00Z"
   }
@@ -226,6 +283,9 @@ MongoDB 数据库名：`ticket_management_logs`。
 | 索引 | 说明 |
 | --- | --- |
 | `{ item_id: 1 }` unique | 按工单编号快速读取详情，保证一个工单一份详情 |
+| `{ "metadata.assigned_admin_id": 1 }` | 按当前负责人筛选 |
+| `{ "metadata.transfer_target_admin_id": 1 }` | 查询待本人确认的接手邀请 |
+| `{ "metadata.last_reminded_at": 1 }` | 催促冷却判定和时间查询 |
 
 ### 5.2 comments
 
@@ -233,6 +293,7 @@ MongoDB 数据库名：`ticket_management_logs`。
 
 ```json
 {
+  "event_id": "与 ticket_history.source_id 相同的 UUID",
   "user_id": "10004",
   "item_id": "2001",
   "content": "用户补充说明或客服回复内容",
@@ -249,6 +310,7 @@ MongoDB 数据库名：`ticket_management_logs`。
 | `{ item_id: 1, created_at: 1 }` | 按工单时间线读取评论 |
 | `{ user_id: 1 }` | 查询某用户评论 |
 | `{ tags: 1 }` | 区分客户回复、客服回复、内部备注和评价 |
+| `{ event_id: 1 }` unique sparse | 新评论与 MySQL 历史事件一一对应，旧评论可无此字段 |
 | `{ user_id: 1, created_at: -1 }` | 查询某用户最近评论 |
 | `{ tags: 1, created_at: -1 }` | 按标签统计和读取最近评论 |
 | `{ rating: 1 }` | 评分分布聚合 |

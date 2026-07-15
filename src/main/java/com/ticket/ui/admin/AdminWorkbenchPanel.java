@@ -7,7 +7,9 @@ import com.ticket.dto.PageResult;
 import com.ticket.model.Category;
 import com.ticket.model.Comment;
 import com.ticket.model.ItemDetail;
+import com.ticket.model.TicketHistory;
 import com.ticket.model.User;
+import com.ticket.model.UserRole;
 import com.ticket.service.BusinessService;
 import com.ticket.service.CategoryService;
 import com.ticket.service.ConnectionPoolMonitorService;
@@ -24,6 +26,7 @@ import com.ticket.ui.component.TextEntryDialog;
 import com.ticket.ui.component.DonutChartPanel;
 import com.ticket.ui.theme.AppTheme;
 import com.ticket.ui.theme.StatusTagRenderer;
+import com.ticket.ui.theme.WindowIconUtil;
 import com.ticket.util.CategoryDisplayUtil;
 import com.ticket.util.TimeFormatUtil;
 import java.awt.BorderLayout;
@@ -45,9 +48,11 @@ import java.util.Map;
 import java.util.concurrent.ExecutionException;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPasswordField;
 import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
@@ -78,6 +83,7 @@ public class AdminWorkbenchPanel extends JPanel {
     private final JLabel homeTodoLabel = new JLabel("—");
     private final JLabel homePendingLabel = new JLabel("—");
     private final JLabel homeProcessingLabel = new JLabel("—");
+    private final JLabel homeAwaitingLabel = new JLabel("—");
     private final JLabel homeCompletedLabel = new JLabel("—");
     private final DonutChartPanel homeStatusChart = new DonutChartPanel();
     private final DefaultTableModel homeRiskModel = new DefaultTableModel(
@@ -112,7 +118,7 @@ public class AdminWorkbenchPanel extends JPanel {
         AppTheme.secondary(changePasswordButton);
         AppTheme.secondary(logoutButton);
         headerLabel.setForeground(AppTheme.MUTED);
-        add(AppTheme.pageHeader("管理员中心", "工单、用户、数据与系统工具统一入口",
+        add(AppTheme.pageHeader("管理中心", "工单、账号治理、数据与系统工具统一入口",
             headerLabel, changePasswordButton, logoutButton), BorderLayout.NORTH);
 
         JPanel body = new JPanel(new BorderLayout());
@@ -143,6 +149,7 @@ public class AdminWorkbenchPanel extends JPanel {
         addNavigationSection(navigation, "业务管理");
         addNavigationButton(navigation, "全部工单", "工单处理");
         addNavigationButton(navigation, "用户管理", "用户管理");
+        addNavigationButton(navigation, "权限管理", "权限管理");
         addNavigationButton(navigation, "分类管理", "分类管理");
         addNavigationSection(navigation, "数据分析");
         addNavigationButton(navigation, "数据统计", "数据报表");
@@ -221,11 +228,12 @@ public class AdminWorkbenchPanel extends JPanel {
         welcome.add(clock, BorderLayout.EAST);
         homePanel.add(welcome, BorderLayout.NORTH);
 
-        JPanel metrics = new JPanel(new java.awt.GridLayout(1, 4, 14, 0));
+        JPanel metrics = new JPanel(new java.awt.GridLayout(1, 5, 14, 0));
         metrics.setOpaque(false);
         metrics.add(createMetricCard("当前待办", homeTodoLabel));
         metrics.add(createMetricCard("我的待处理", homePendingLabel));
         metrics.add(createMetricCard("我的处理中", homeProcessingLabel));
+        metrics.add(createMetricCard("待我确认", homeAwaitingLabel));
         metrics.add(createMetricCard("我的累计已完成", homeCompletedLabel));
         JPanel content = new JPanel(new BorderLayout(0, 14));
         content.setOpaque(false);
@@ -274,11 +282,13 @@ public class AdminWorkbenchPanel extends JPanel {
         riskCard.add(AppTheme.scroll(homeRiskTable), BorderLayout.CENTER);
         riskCard.add(homeRiskHint, BorderLayout.SOUTH);
 
-        JPanel quickActions = new JPanel(new java.awt.GridLayout(1, 4, 8, 0));
+        JPanel quickActions = new JPanel(new java.awt.GridLayout(1, 5, 8, 0));
         quickActions.setOpaque(false);
         quickActions.add(createHomeQuickButton("我的待处理", () -> openMyTickets(0)));
         quickActions.add(createHomeQuickButton("我的处理中", () -> openMyTickets(1)));
         quickActions.add(createHomeQuickButton("全部我的工单", () -> openMyTickets(null)));
+        quickActions.add(createHomeQuickButton("待我确认", () ->
+            showTicketManager(null, AssignmentFilterKind.PENDING_MINE)));
         quickActions.add(createHomeQuickButton("刷新概览", this::loadHomeSummary));
         JPanel quickCard = AppTheme.surface(new BorderLayout(0, 8));
         JLabel quickTitle = new JLabel("快捷操作");
@@ -327,6 +337,7 @@ public class AdminWorkbenchPanel extends JPanel {
         homeTodoLabel.setText("—");
         homePendingLabel.setText("—");
         homeProcessingLabel.setText("—");
+        homeAwaitingLabel.setText("—");
         homeCompletedLabel.setText("—");
         homeRiskHint.setText("正在加载个人待办…");
         homeUpdatedLabel.setText("更新中…");
@@ -350,9 +361,12 @@ public class AdminWorkbenchPanel extends JPanel {
                     Map<Integer, Long> counts = overview.statusCounts();
                     long pending = counts.getOrDefault(0, 0L);
                     long processing = counts.getOrDefault(1, 0L);
-                    homeTodoLabel.setText(String.valueOf(pending + processing));
+                    long awaiting = counts.getOrDefault(
+                        CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION, 0L);
+                    homeTodoLabel.setText(String.valueOf(pending + processing + awaiting));
                     homePendingLabel.setText(String.valueOf(pending));
                     homeProcessingLabel.setText(String.valueOf(processing));
+                    homeAwaitingLabel.setText(String.valueOf(awaiting));
                     homeCompletedLabel.setText(String.valueOf(counts.getOrDefault(2, 0L)));
                     updateHomeDashboard(overview);
                 } catch (Exception ex) {
@@ -368,6 +382,9 @@ public class AdminWorkbenchPanel extends JPanel {
         homeStatusChart.setSegments(List.of(
             new DonutChartPanel.Segment("待处理", counts.getOrDefault(0, 0L), AppTheme.WARNING, 0),
             new DonutChartPanel.Segment("处理中", counts.getOrDefault(1, 0L), AppTheme.PRIMARY, 1),
+            new DonutChartPanel.Segment("待确认", counts.getOrDefault(
+                CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION, 0L),
+                new java.awt.Color(124, 58, 237), CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION),
             new DonutChartPanel.Segment("已完成", counts.getOrDefault(2, 0L), AppTheme.SUCCESS, 2),
             new DonutChartPanel.Segment("已关闭", counts.getOrDefault(3, 0L), new java.awt.Color(107, 114, 128), 3),
             new DonutChartPanel.Segment("已取消", counts.getOrDefault(4, 0L), new java.awt.Color(190, 75, 75), 4)
@@ -382,14 +399,15 @@ public class AdminWorkbenchPanel extends JPanel {
             homeRiskModel.addRow(new Object[]{
                 ticket.getItem() == null ? "" : ticket.getItem().getItemId(),
                 ticket.getItem() == null ? "" : ticket.getItem().getTitle(),
-                ticket.getOrder() == null ? "" : statusText(ticket.getOrder().getStatus()),
+                ticket.getOrder() == null ? "" : statusText(homeDisplayStatus(ticket)),
                 metadata == null ? "" : nullToEmpty(metadata.getPriority()),
                 waitingTime(ticket)
             });
         }
-        homeRiskHint.setText(homeRiskTickets.isEmpty()
-            ? "当前没有待处理或处理中的个人工单"
-            : "");
+        long awaiting = counts.getOrDefault(CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION, 0L);
+        homeRiskHint.setText(awaiting > 0
+            ? "有 " + awaiting + " 个转派申请待你确认；双击对应工单可查看详情。"
+            : homeRiskTickets.isEmpty() ? "当前没有待处理、处理中或待确认的个人工单" : "");
     }
 
     private String waitingTime(CrossTicketDTO ticket) {
@@ -408,7 +426,8 @@ public class AdminWorkbenchPanel extends JPanel {
 
     private void openMyTickets(Integer status) {
         showModuleHint("全部工单");
-        showTicketManager(status, AssignmentFilterKind.MINE);
+        showTicketManager(status, Integer.valueOf(CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION).equals(status)
+            ? AssignmentFilterKind.PENDING_MINE : AssignmentFilterKind.MINE);
     }
 
     private void showOverviewRiskTicket(int selectedRow) {
@@ -444,16 +463,36 @@ public class AdminWorkbenchPanel extends JPanel {
                     homeRiskHint.setText("");
                 } catch (Exception ex) {
                     homeRiskHint.setText("工单详情加载失败：" + rootMessage(ex));
-                    JOptionPane.showMessageDialog(AdminWorkbenchPanel.this,
-                        "加载工单详情失败：" + rootMessage(ex), "提示", JOptionPane.WARNING_MESSAGE);
                 }
             }
         }.execute();
     }
 
     private void openModule(String moduleName) {
+        if (!canOpenModule(moduleName)) {
+            JOptionPane.showMessageDialog(this, "当前角色无权访问该模块。", "提示", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
         showModuleHint(moduleName);
         handleModuleClick(moduleName);
+    }
+
+    private boolean canOpenModule(String moduleName) {
+        if (currentUser == null) {
+            return false;
+        }
+        String role = currentUser.getRole();
+        if ("ROOT".equals(role)) {
+            return List.of("用户管理", "权限管理", "数据统计", "行为日志", "系统日志", "系统自检", "连接池监控")
+                .contains(moduleName);
+        }
+        return "ADMIN".equals(role) && !"权限管理".equals(moduleName);
+    }
+
+    private void updateNavigationForRole() {
+        for (var entry : navigationButtons.entrySet()) {
+            entry.getValue().setVisible(canOpenModule(entry.getKey()));
+        }
     }
 
     private void handleModuleClick(String moduleName) {
@@ -461,6 +500,7 @@ public class AdminWorkbenchPanel extends JPanel {
             case "工作概览" -> showAdminHome();
             case "全部工单" -> showTicketManager();
             case "用户管理" -> showUserManager();
+            case "权限管理" -> showPermissionManager();
             case "分类管理" -> showCategoryManager();
             case "数据统计" -> loadStats();
             case "行为日志" -> loadBehaviorLogs();
@@ -489,7 +529,11 @@ public class AdminWorkbenchPanel extends JPanel {
             }
             case "用户管理" -> {
                 centerArea.setText("按用户名、邮箱和账号状态筛选用户，并对账号执行启用或禁用操作。");
-                rightArea.setText("账号状态变更会经过 ADMIN 权限校验并写入审计日志。");
+                rightArea.setText("服务层按角色层级校验，任何账号都不能禁用自己，ADMIN 不能操作同级账号。");
+            }
+            case "权限管理" -> {
+                centerArea.setText("由 ROOT 创建后台账号并调整角色；临时密码只显示一次，首次登录必须修改。");
+                rightArea.setText("角色变更会记录操作者、目标账号、修改前后角色和原因。最后一个有效 ROOT 受事务保护。");
             }
             case "分类管理" -> {
                 centerArea.setText("分类采用严格两级结构：一级分类用于归组，二级分类用于细分工单。");
@@ -540,6 +584,7 @@ public class AdminWorkbenchPanel extends JPanel {
             case "工作概览" -> "查看个人待办、风险工单与工作状态";
             case "全部工单" -> "查询工单并完成回复、备注、分配和状态流转";
             case "用户管理" -> "筛选账号并管理启用状态";
+            case "权限管理" -> "创建后台账号并治理 ROOT 与 ADMIN 角色";
             case "分类管理" -> "维护工单使用的一级和二级分类";
             case "数据统计" -> "查看 MySQL 月度报表与 MongoDB 聚合统计";
             case "行为日志" -> "分析用户行为、评论和评分数据";
@@ -611,7 +656,7 @@ public class AdminWorkbenchPanel extends JPanel {
             selectAssignmentFilter(assignmentFilterBox, initialAssignment);
             AppTheme.styleComboBox(assignmentFilterBox);
             DefaultTableModel model = new DefaultTableModel(
-                new Object[]{"记录编号", "工单编号", "标题", "用户", "状态", "分类", "优先级", "分配客服", "创建时间"}, 0);
+                new Object[]{"记录编号", "工单编号", "标题", "用户", "状态", "分类", "优先级", "催促", "分配客服", "创建时间"}, 0);
             JTable table = new JTable(model);
             table.setDefaultEditor(Object.class, null);
             AppTheme.styleTable(table);
@@ -626,10 +671,10 @@ public class AdminWorkbenchPanel extends JPanel {
 
             JTextField keywordField = new JTextField(18);
             JComboBox<String> statusFilter = new JComboBox<>(new String[]{
-                "全部状态", "0 待处理", "1 处理中", "2 已完成", "3 已关闭", "4 已取消"
+                "全部状态", "0 待处理", "1 处理中", "2 已完成", "3 已关闭", "4 已取消", "5 待确认"
             });
             statusFilter.setSelectedIndex(initialStatus == null
-                ? 0 : Math.max(0, Math.min(4, initialStatus)) + 1);
+                ? 0 : Math.max(0, Math.min(5, initialStatus)) + 1);
             AppTheme.styleComboBox(statusFilter);
             AppTheme.styleInput(keywordField);
             JButton refreshButton = new JButton("刷新");
@@ -657,7 +702,7 @@ public class AdminWorkbenchPanel extends JPanel {
             replyButton.setToolTipText("向客户发送一条可见回复");
             noteButton.setToolTipText("添加仅管理员可见的协作备注");
             statusButton.setToolTipText("将工单流转到下一个可用状态");
-            assignButton.setToolTipText("将工单分配或重新分配给客服");
+            assignButton.setToolTipText("未分配工单需确认认领；转派必须由当前负责人发起并由目标管理员确认");
 
             JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
             toolbar.setOpaque(false);
@@ -857,6 +902,7 @@ public class AdminWorkbenchPanel extends JPanel {
         AssignmentScope selectedAssignmentScope = assignmentScope(assignmentFilter);
         String selectedAdminId = assignmentAdminId(assignmentFilter, actor);
         long requestVersion = ++requestVersions[0];
+        java.util.Map<Long, String> cachedCategoryNames = java.util.Map.copyOf(categoryDisplayNames);
         detailArea.setText("工单加载中…");
         pageLabel.setText("第 " + page + " 页 · 加载中…");
         previousPageButton.setEnabled(false);
@@ -866,8 +912,9 @@ public class AdminWorkbenchPanel extends JPanel {
             protected TicketPageLoad doInBackground() {
                 PageResult<CrossTicketDTO> ticketPage = crossDatabaseQueryService.pageAdminTickets(
                     actor, status, normalizedKeyword, selectedAssignmentScope, selectedAdminId, page, 50);
-                java.util.Map<Long, String> displayNames = CategoryDisplayUtil.buildDisplayNames(
-                    categoryService.listCategories(actor));
+                java.util.Map<Long, String> displayNames = cachedCategoryNames.isEmpty()
+                    ? CategoryDisplayUtil.buildDisplayNames(categoryService.listAvailableCategories(actor))
+                    : cachedCategoryNames;
                 return new TicketPageLoad(ticketPage, displayNames);
             }
 
@@ -892,9 +939,11 @@ public class AdminWorkbenchPanel extends JPanel {
                         selectTicketRow(table, tickets, itemIdToRestore);
                     }
                 } catch (Exception ex) {
+                    String message = "加载工单失败：" + rootMessage(ex);
                     pageLabel.setText("第 " + page + " 页 · 加载失败");
+                    detailArea.setText(message);
+                    detailArea.setCaretPosition(0);
                     previousPageButton.setEnabled(page > 1);
-                    JOptionPane.showMessageDialog(AdminWorkbenchPanel.this, "加载工单失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
                 }
             }
         }.execute();
@@ -911,15 +960,23 @@ public class AdminWorkbenchPanel extends JPanel {
                 ItemDetail.Metadata metadata = ticket.getItemDetail() == null
                     ? null : ticket.getItemDetail().getMetadata();
                 String assignedAdminId = metadata == null ? null : metadata.getAssignedAdminId();
+                String assignmentText = assignedAdminDisplay(assignedAdminId, adminNameById);
+                if (metadata != null && hasText(metadata.getTransferTargetAdminId())) {
+                    assignmentText += " → "
+                        + assignedAdminDisplay(metadata.getTransferTargetAdminId(), adminNameById) + "（待确认）";
+                }
                 model.addRow(new Object[]{
                     ticket.getOrder() == null ? "" : ticket.getOrder().getOrderId(),
                     ticket.getItem() == null ? "" : ticket.getItem().getItemId(),
                     ticket.getItem() == null ? "" : ticket.getItem().getTitle(),
                     ticket.getUser() == null ? "" : ticket.getUser().getUsername(),
-                    ticket.getOrder() == null ? "" : statusText(ticket.getOrder().getStatus()),
+                    ticket.getOrder() == null ? "" : statusText(
+                        hasPendingTransfer(ticket) ? CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION
+                            : ticket.getOrder().getStatus()),
                     categoryDisplay(ticket.getCategory()),
                     metadata == null ? "" : metadata.getPriority(),
-                    assignedAdminDisplay(assignedAdminId, adminNameById),
+                    metadata == null || metadata.getReminderCount() == 0 ? "" : metadata.getReminderCount() + " 次",
+                    assignmentText,
                     ticket.getOrder() == null ? "—" : TimeFormatUtil.format(ticket.getOrder().getCreatedAt())
                 });
             }
@@ -1018,7 +1075,7 @@ public class AdminWorkbenchPanel extends JPanel {
             if (internalNote) {
                 businessService.addInternalNote(currentUser, ticket.getItem().getItemId(), result.text());
             } else {
-                businessService.addAgentReply(currentUser, ticket.getItem().getItemId(), result.text());
+                businessService.addAdminReply(currentUser, ticket.getItem().getItemId(), result.text());
             }
             detailRequestVersions[0]++;
             refreshTicketAfterOperation(parent, table, tickets, itemId, detailArea, ticketStateLabel, detailCache,
@@ -1082,35 +1139,116 @@ public class AdminWorkbenchPanel extends JPanel {
         if (ticket == null) {
             return;
         }
-        if (!ensureCanProcessTicket(parent, ticket, ticketStateLabel)) {
-            return;
-        }
         Long itemId = ticket.getItem().getItemId();
-        List<AdminOption> adminOptions = activeAdminOptions();
-        if (adminOptions.isEmpty()) {
-            JOptionPane.showMessageDialog(parent, "暂无可分配的启用 ADMIN 用户。", "提示", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        JComboBox<AdminOption> adminBox = new JComboBox<>(adminOptions.toArray(new AdminOption[0]));
-        selectCurrentAdmin(adminBox);
-        ChoiceDialog.Result<AdminOption> result = ChoiceDialog.show(
-            parent,
-            "分配客服",
-            "选择工单负责人",
-            "工单 #" + itemId + " · 当前归属：" + assignmentSummary(ticket),
-            "分配给",
-            adminBox,
-            "确认分配");
-        if (!result.accepted() || result.value() == null) {
-            bringParentToFront(parent);
-            return;
-        }
+        String actorId = currentUser == null ? null : String.valueOf(currentUser.getUserId());
+        String requesterId = transferRequesterAdminId(ticket);
+        String targetId = transferTargetAdminId(ticket);
+        String successMessage;
         try {
+            if (hasPendingTransfer(ticket)) {
+                String requestSummary = "工单 #" + itemId
+                    + "\n发起人：管理员 #" + requesterId
+                    + "\n目标：管理员 #" + targetId
+                    + "\n原因：" + nullToEmpty(transferReason(ticket));
+                if (actorId != null && actorId.equals(targetId)) {
+                    Object[] options = {"接受接手", "拒绝", "暂不处理"};
+                    int choice = JOptionPane.showOptionDialog(parent,
+                        requestSummary + "\n\n接受后你将成为新负责人；拒绝后原归属保持不变。",
+                        "确认接手邀请", JOptionPane.DEFAULT_OPTION, JOptionPane.QUESTION_MESSAGE,
+                        null, options, options[2]);
+                    if (choice != 0 && choice != 1) {
+                        return;
+                    }
+                    businessService.respondToTicketTransfer(
+                        currentUser, itemId, transferRequestId(ticket), choice == 0);
+                    successMessage = choice == 0 ? "已接受接手邀请。" : "已拒绝接手邀请。";
+                } else if (actorId != null && actorId.equals(requesterId)) {
+                    int confirm = JOptionPane.showConfirmDialog(parent,
+                        requestSummary + "\n\n确定取消这次接手邀请吗？",
+                        "取消接手邀请", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                    if (confirm != JOptionPane.YES_OPTION) {
+                        return;
+                    }
+                    businessService.cancelTicketTransfer(currentUser, itemId, transferRequestId(ticket));
+                    successMessage = "接手邀请已取消。";
+                } else {
+                    AppTheme.toast(parent, "该工单存在其他管理员之间待确认的接手邀请。", true);
+                    return;
+                }
+                reload.accept(itemId);
+                refreshTicketAfterOperation(parent, table, tickets, itemId, detailArea, ticketStateLabel,
+                    detailCache, successMessage);
+                return;
+            }
+
+            String assignedId = assignedAdminId(ticket);
+            if (hasText(assignedId) && !assignedId.equals(actorId)) {
+                AppTheme.toast(parent, "该工单由管理员 #" + assignedId + " 负责，不能代替其发起转派。", true);
+                return;
+            }
+
+            List<AdminOption> adminOptions = activeAdminOptions();
+            if (hasText(assignedId)) {
+                adminOptions = adminOptions.stream()
+                    .filter(option -> !currentUser.getUserId().equals(option.user().getUserId()))
+                    .toList();
+            }
+            if (adminOptions.isEmpty()) {
+                JOptionPane.showMessageDialog(parent,
+                    hasText(assignedId) ? "暂无其他可接手的启用 ADMIN。" : "暂无可分配的启用 ADMIN。",
+                    "提示", JOptionPane.INFORMATION_MESSAGE);
+                return;
+            }
+            JComboBox<AdminOption> adminBox = new JComboBox<>(adminOptions.toArray(new AdminOption[0]));
+            if (!hasText(assignedId)) {
+                selectCurrentAdmin(adminBox);
+            }
+            ChoiceDialog.Result<AdminOption> result = ChoiceDialog.show(
+                parent,
+                hasText(assignedId) ? "申请转派" : "认领或邀请接手",
+                hasText(assignedId) ? "选择拟接手管理员" : "选择自己可直接认领；选择他人需对方确认",
+                "工单 #" + itemId + " · 当前归属：" + assignmentSummary(ticket),
+                "目标管理员",
+                adminBox,
+                "下一步");
+            if (!result.accepted() || result.value() == null) {
+                return;
+            }
             AdminOption selectedAdmin = result.value();
-            businessService.assignAdmin(currentUser, ticket.getItem().getItemId(), selectedAdmin.user().getUserId());
+            if (!hasText(assignedId) && currentUser.getUserId().equals(selectedAdmin.user().getUserId())) {
+                int confirm = JOptionPane.showConfirmDialog(parent,
+                    "确认认领工单 #" + itemId + "？\n认领后只有你可以回复和流转该工单。",
+                    "确认认领", JOptionPane.YES_NO_OPTION, JOptionPane.QUESTION_MESSAGE);
+                if (confirm != JOptionPane.YES_OPTION) {
+                    return;
+                }
+                businessService.claimTicket(currentUser, itemId);
+                successMessage = "工单已确认认领。";
+            } else {
+                JLabel warning = AppTheme.muted("当前负责人：" + assignmentSummary(ticket)
+                    + "；拟邀请：" + selectedAdmin.user().getUsername() + "。目标管理员接受后才会生效。");
+                TextEntryDialog.Result reasonResult = TextEntryDialog.show(parent, "填写转派原因",
+                    "请输入邀请接手的具体原因", warning, 4, 42);
+                if (!reasonResult.accepted()) {
+                    return;
+                }
+                String reason = reasonResult.text() == null ? "" : reasonResult.text().trim();
+                int confirm = JOptionPane.showConfirmDialog(parent,
+                    "工单 #" + itemId
+                        + "\n目标管理员：" + selectedAdmin.user().getUsername()
+                        + "\n原因：" + reason
+                        + "\n\n确认发送接手邀请？在对方接受前，负责人不会改变。",
+                    "确认发送接手邀请", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+                if (confirm != JOptionPane.YES_OPTION) {
+                    return;
+                }
+                businessService.requestTicketTransfer(currentUser, itemId,
+                    selectedAdmin.user().getUserId(), reason);
+                successMessage = "接手邀请已发送，等待目标管理员确认。";
+            }
             reload.accept(itemId);
             refreshTicketAfterOperation(parent, table, tickets, itemId, detailArea, ticketStateLabel,
-                detailCache, "客服分配已保存。");
+                detailCache, successMessage);
         } catch (Exception ex) {
             JOptionPane.showMessageDialog(parent, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
         } finally {
@@ -1141,8 +1279,16 @@ public class AdminWorkbenchPanel extends JPanel {
             return;
         }
         CrossTicketDTO ticket = tickets.get(selectedRow);
-        boolean canProcess = canCurrentAdminProcess(ticket);
-        setTicketActionButtonsEnabled(canProcess, replyButton, noteButton, statusButton, assignButton);
+        boolean terminal = ticket.getOrder() != null
+            && (Integer.valueOf(3).equals(ticket.getOrder().getStatus())
+                || Integer.valueOf(4).equals(ticket.getOrder().getStatus()));
+        boolean canProcess = canCurrentAdminProcess(ticket) && !terminal;
+        setTicketActionButtonsEnabled(canProcess, replyButton, noteButton);
+        statusButton.setEnabled(canProcess && !hasPendingTransfer(ticket));
+        boolean canManageAssignment = canCurrentAdminManageAssignment(ticket)
+            && (!terminal || hasPendingTransfer(ticket));
+        assignButton.setEnabled(canManageAssignment);
+        assignButton.setText(assignmentButtonText(ticket));
         setTicketState(ticketStateLabel, ticket);
     }
 
@@ -1156,7 +1302,10 @@ public class AdminWorkbenchPanel extends JPanel {
         if (canCurrentAdminProcess(ticket)) {
             return true;
         }
-        String message = "当前工单已分配给管理员 " + assignedAdminId(ticket) + "，你可以查看，但不能处理。";
+        String assignedId = assignedAdminId(ticket);
+        String message = hasText(assignedId)
+            ? "当前工单已分配给管理员 " + assignedId + "，你可以查看，但不能处理。"
+            : "当前工单尚未分配，请先确认认领后再处理。";
         setTicketState(ticketStateLabel, ticket);
         AppTheme.toast(parent, message, true);
         return false;
@@ -1183,8 +1332,22 @@ public class AdminWorkbenchPanel extends JPanel {
             background = new java.awt.Color(243, 244, 246);
         } else {
             String assignedAdminId = assignedAdminId(ticket);
-            if (assignedAdminId == null || assignedAdminId.isBlank()) {
-                text = "未分配 · 可处理";
+            String actorId = currentUser == null ? null : String.valueOf(currentUser.getUserId());
+            if (hasPendingTransfer(ticket) && actorId != null && actorId.equals(transferTargetAdminId(ticket))) {
+                text = "待我确认接手";
+                foreground = new java.awt.Color(180, 83, 9);
+                background = new java.awt.Color(255, 247, 237);
+            } else if (hasPendingTransfer(ticket) && actorId != null
+                    && actorId.equals(transferRequesterAdminId(ticket))) {
+                text = "接手邀请待确认";
+                foreground = new java.awt.Color(180, 83, 9);
+                background = new java.awt.Color(255, 247, 237);
+            } else if (hasPendingTransfer(ticket)) {
+                text = "存在待确认接手邀请";
+                foreground = AppTheme.MUTED;
+                background = new java.awt.Color(243, 244, 246);
+            } else if (assignedAdminId == null || assignedAdminId.isBlank()) {
+                text = "未分配 · 请先认领";
                 foreground = new java.awt.Color(180, 83, 9);
                 background = new java.awt.Color(255, 247, 237);
             } else if (canCurrentAdminProcess(ticket)) {
@@ -1205,9 +1368,33 @@ public class AdminWorkbenchPanel extends JPanel {
 
     private boolean canCurrentAdminProcess(CrossTicketDTO ticket) {
         String assignedAdminId = assignedAdminId(ticket);
-        return assignedAdminId == null
-            || assignedAdminId.isBlank()
-            || (currentUser != null && assignedAdminId.equals(String.valueOf(currentUser.getUserId())));
+        return currentUser != null && hasText(assignedAdminId)
+            && assignedAdminId.equals(String.valueOf(currentUser.getUserId()));
+    }
+
+    private boolean canCurrentAdminManageAssignment(CrossTicketDTO ticket) {
+        if (currentUser == null) {
+            return false;
+        }
+        String actorId = String.valueOf(currentUser.getUserId());
+        if (hasPendingTransfer(ticket)) {
+            return actorId.equals(transferTargetAdminId(ticket)) || actorId.equals(transferRequesterAdminId(ticket));
+        }
+        String assignedId = assignedAdminId(ticket);
+        return !hasText(assignedId) || actorId.equals(assignedId);
+    }
+
+    private String assignmentButtonText(CrossTicketDTO ticket) {
+        if (currentUser != null && hasPendingTransfer(ticket)) {
+            String actorId = String.valueOf(currentUser.getUserId());
+            if (actorId.equals(transferTargetAdminId(ticket))) {
+                return "处理接手邀请";
+            }
+            if (actorId.equals(transferRequesterAdminId(ticket))) {
+                return "取消接手邀请";
+            }
+        }
+        return hasText(assignedAdminId(ticket)) ? "申请转派" : "认领/邀请接手";
     }
 
     private String assignedAdminId(CrossTicketDTO ticket) {
@@ -1215,6 +1402,56 @@ public class AdminWorkbenchPanel extends JPanel {
             return null;
         }
         return ticket.getItemDetail().getMetadata().getAssignedAdminId();
+    }
+
+    private String transferRequesterAdminId(CrossTicketDTO ticket) {
+        return ticketMetadata(ticket) == null ? null : ticketMetadata(ticket).getTransferRequestedByAdminId();
+    }
+
+    private String transferRequestId(CrossTicketDTO ticket) {
+        if (ticket != null && ticket.getOrder() != null && hasText(ticket.getOrder().getTransferRequestId())) {
+            return ticket.getOrder().getTransferRequestId();
+        }
+        return ticketMetadata(ticket) == null ? null : ticketMetadata(ticket).getTransferRequestId();
+    }
+
+    private String transferTargetAdminId(CrossTicketDTO ticket) {
+        if (ticket != null && ticket.getOrder() != null && ticket.getOrder().getTransferTargetAdminId() != null) {
+            return String.valueOf(ticket.getOrder().getTransferTargetAdminId());
+        }
+        return ticketMetadata(ticket) == null ? null : ticketMetadata(ticket).getTransferTargetAdminId();
+    }
+
+    private String transferReason(CrossTicketDTO ticket) {
+        return ticketMetadata(ticket) == null ? null : ticketMetadata(ticket).getTransferReason();
+    }
+
+    private boolean hasPendingTransfer(CrossTicketDTO ticket) {
+        return hasText(transferTargetAdminId(ticket));
+    }
+
+    private Integer homeDisplayStatus(CrossTicketDTO ticket) {
+        String actorId = currentUser == null || currentUser.getUserId() == null
+            ? null : String.valueOf(currentUser.getUserId());
+        if (actorId != null && actorId.equals(transferTargetAdminId(ticket))) {
+            return CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION;
+        }
+        return ticket == null || ticket.getOrder() == null ? null : ticket.getOrder().getStatus();
+    }
+
+    private Integer displayStatus(CrossTicketDTO ticket) {
+        if (hasPendingTransfer(ticket)) {
+            return CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION;
+        }
+        return ticket == null || ticket.getOrder() == null ? null : ticket.getOrder().getStatus();
+    }
+
+    private ItemDetail.Metadata ticketMetadata(CrossTicketDTO ticket) {
+        return ticket == null || ticket.getItemDetail() == null ? null : ticket.getItemDetail().getMetadata();
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.isBlank();
     }
 
     private String assignmentSummary(CrossTicketDTO ticket) {
@@ -1229,9 +1466,7 @@ public class AdminWorkbenchPanel extends JPanel {
     }
 
     private List<AdminOption> activeAdminOptions() {
-        return userService.listUsers(currentUser).stream()
-            .filter(user -> "ADMIN".equals(user.getRole()))
-            .filter(user -> user.getStatus() != null && user.getStatus() == 1)
+        return userService.listAssignableStaff(currentUser).stream()
             .map(AdminOption::new)
             .toList();
     }
@@ -1249,6 +1484,7 @@ public class AdminWorkbenchPanel extends JPanel {
         filters.add(new AssignmentFilter(AssignmentFilterKind.ALL, null, "全部工单"));
         filters.add(new AssignmentFilter(AssignmentFilterKind.UNASSIGNED, null, "未分配"));
         filters.add(new AssignmentFilter(AssignmentFilterKind.MINE, null, "我的工单"));
+        filters.add(new AssignmentFilter(AssignmentFilterKind.PENDING_MINE, null, "待我确认"));
         for (AdminOption option : adminOptions) {
             String adminId = String.valueOf(option.user().getUserId());
             filters.add(new AssignmentFilter(AssignmentFilterKind.ADMIN, adminId, option.toString()));
@@ -1278,11 +1514,13 @@ public class AdminWorkbenchPanel extends JPanel {
             case ALL -> AssignmentScope.ALL;
             case UNASSIGNED -> AssignmentScope.UNASSIGNED;
             case MINE, ADMIN -> AssignmentScope.ASSIGNED_TO;
+            case PENDING_MINE -> AssignmentScope.PENDING_TRANSFER_TO;
         };
     }
 
     private String assignmentAdminId(AssignmentFilter filter, User actor) {
-        if (filter.kind() == AssignmentFilterKind.MINE) {
+        if (filter.kind() == AssignmentFilterKind.MINE
+                || filter.kind() == AssignmentFilterKind.PENDING_MINE) {
             return actor == null ? null : String.valueOf(actor.getUserId());
         }
         return filter.kind() == AssignmentFilterKind.ADMIN ? filter.adminId() : null;
@@ -1332,7 +1570,7 @@ public class AdminWorkbenchPanel extends JPanel {
 
     private void refreshRightTicketSummary(CrossTicketDTO ticket) {
         rightArea.setText("当前工单：" + ticket.getItem().getTitle()
-            + "\n状态：" + (ticket.getOrder() == null ? "" : statusText(ticket.getOrder().getStatus()))
+            + "\n状态：" + (ticket.getOrder() == null ? "" : statusText(displayStatus(ticket)))
             + "\n评论数：" + ticket.getCommentCount());
     }
 
@@ -1364,7 +1602,7 @@ public class AdminWorkbenchPanel extends JPanel {
         builder.append("标题：").append(ticket.getItem().getTitle()).append('\n');
         if (ticket.getOrder() != null) {
             builder.append("记录编号：").append(ticket.getOrder().getOrderId()).append('\n');
-            builder.append("状态：").append(statusText(ticket.getOrder().getStatus())).append('\n');
+            builder.append("状态：").append(statusText(displayStatus(ticket))).append('\n');
             builder.append("金额：").append(ticket.getOrder().getAmount()).append('\n');
             builder.append("创建时间：").append(TimeFormatUtil.format(ticket.getOrder().getCreatedAt())).append('\n');
         }
@@ -1384,6 +1622,21 @@ public class AdminWorkbenchPanel extends JPanel {
             ItemDetail.Metadata metadata = detail.getMetadata();
             builder.append("优先级：").append(metadata == null ? "" : nullToEmpty(metadata.getPriority())).append('\n');
             builder.append("分配客服：").append(metadata == null ? "" : nullToEmpty(metadata.getAssignedAdminId())).append('\n');
+            if (metadata != null && hasText(metadata.getTransferTargetAdminId())) {
+                builder.append("接手邀请：管理员 #")
+                    .append(metadata.getTransferRequestedByAdminId())
+                    .append(" → 管理员 #")
+                    .append(metadata.getTransferTargetAdminId())
+                    .append("（等待目标确认）").append('\n');
+                builder.append("转派原因：").append(nullToEmpty(metadata.getTransferReason())).append('\n');
+                builder.append("申请时间：").append(metadata.getTransferRequestedAt() == null ? "—"
+                    : TimeFormatUtil.format(metadata.getTransferRequestedAt())).append('\n');
+            }
+            if (metadata != null) {
+                builder.append("用户催促：").append(metadata.getReminderCount()).append(" 次").append('\n');
+                builder.append("最近催促：").append(metadata.getLastRemindedAt() == null ? "尚未催促"
+                    : TimeFormatUtil.format(metadata.getLastRemindedAt())).append('\n');
+            }
             builder.append("\n描述：\n").append(nullToEmpty(detail.getDescription())).append('\n');
         }
         if (!ticket.getConsistencyWarnings().isEmpty()) {
@@ -1392,6 +1645,7 @@ public class AdminWorkbenchPanel extends JPanel {
                 builder.append("- ").append(warning).append('\n');
             }
         }
+        appendAdminTicketHistory(builder, ticket.getHistories());
         builder.append("\n回复与备注：\n");
         if (ticket.getComments().isEmpty()) {
             builder.append("暂无回复\n");
@@ -1410,276 +1664,68 @@ public class AdminWorkbenchPanel extends JPanel {
         return builder.toString();
     }
 
+    private void appendAdminTicketHistory(StringBuilder builder, List<TicketHistory> histories) {
+        builder.append("\n流转历史：\n");
+        if (histories == null || histories.isEmpty()) {
+            builder.append("暂无历史记录\n");
+            return;
+        }
+        for (TicketHistory history : histories) {
+            builder.append("[").append(TimeFormatUtil.format(history.getOccurredAt())).append("] ")
+                .append(adminHistoryText(history)).append('\n');
+        }
+    }
+
+    private String adminHistoryText(TicketHistory history) {
+        String actor = history.getActorUsername() == null || history.getActorUsername().isBlank()
+            ? (history.getActorUserId() == null ? "系统" : "用户 #" + history.getActorUserId())
+            : history.getActorUsername() + " (#" + history.getActorUserId() + ")";
+        return switch (history.getEventType()) {
+            case "TICKET_CREATED" -> actor + " 创建工单";
+            case "MIGRATION_SNAPSHOT" -> "历史数据迁移快照，当时状态：" + statusText(history.getToStatus());
+            case "TICKET_CLAIMED" -> actor + " 认领工单";
+            case "TRANSFER_REQUESTED" -> actor + " 申请转派：" + adminFlow(history);
+            case "TRANSFER_ACCEPTED" -> actor + " 接受转派：" + adminFlow(history);
+            case "TRANSFER_REJECTED" -> actor + " 拒绝接手邀请" + reasonSuffix(history.getReason());
+            case "TRANSFER_CANCELLED" -> actor + " 撤销接手邀请" + reasonSuffix(history.getReason());
+            case "STATUS_CHANGED", "AUTO_CANCELLED", "BATCH_STATUS_CHANGED" -> actor + " 变更状态："
+                + statusText(history.getFromStatus()) + " → " + statusText(history.getToStatus());
+            case "REMINDER_SENT" -> actor + " 催促处理";
+            case "CUSTOMER_REPLY_ADDED" -> actor + " 追加客户回复";
+            case "ADMIN_REPLY_ADDED" -> actor + " 添加客服回复";
+            case "INTERNAL_NOTE_ADDED" -> actor + " 添加内部备注";
+            case "RATING_SUBMITTED" -> actor + " 提交工单评价";
+            case "CATEGORY_REASSIGNED" -> "系统调整工单分类" + reasonSuffix(history.getReason());
+            default -> actor + " " + history.getEventType();
+        };
+    }
+
+    private String adminFlow(TicketHistory history) {
+        String from = history.getFromAdminId() == null ? "未分配" : "管理员 #" + history.getFromAdminId();
+        String to = history.getToAdminId() == null ? "未分配" : "管理员 #" + history.getToAdminId();
+        return from + " → " + to + reasonSuffix(history.getReason());
+    }
+
+    private String reasonSuffix(String reason) {
+        return reason == null || reason.isBlank() ? "" : "，原因：" + reason;
+    }
+
     private String formatBeijingTime(Instant instant) {
         return TimeFormatUtil.format(instant);
     }
 
     private void showCategoryManager() {
-        try {
-            if (focusExistingModulePage("分类管理")) {
-                return;
-            }
-            DefaultTableModel model = new DefaultTableModel(new Object[]{"分类编号", "分类名称", "层级", "父分类"}, 0) {
-                @Override
-                public boolean isCellEditable(int row, int column) {
-                    return false;
-                }
-            };
-            JTable table = new JTable(model);
-            AppTheme.styleTable(table);
-            table.getColumnModel().getColumn(0).setPreferredWidth(80);
-            table.getColumnModel().getColumn(0).setMaxWidth(100);
-            table.getColumnModel().getColumn(2).setPreferredWidth(85);
-            table.getColumnModel().getColumn(2).setMaxWidth(100);
-            JTextField nameField = new JTextField();
-            AppTheme.styleInput(nameField);
-            JComboBox<ParentCategoryOption> parentBox = new JComboBox<>();
-            AppTheme.styleComboBox(parentBox);
-            JButton refreshButton = new JButton("刷新");
-            JButton clearButton = new JButton("新建分类");
-            JButton addButton = new JButton("保存为新分类");
-            JButton updateButton = new JButton("保存修改");
-            JButton deleteButton = new JButton("删除分类");
-            AppTheme.secondary(refreshButton);
-            AppTheme.secondary(clearButton);
-            AppTheme.primary(addButton);
-            AppTheme.secondary(updateButton);
-            AppTheme.danger(deleteButton);
-            updateButton.setEnabled(false);
-            deleteButton.setEnabled(false);
-            JLabel selectedLabel = AppTheme.muted("新建分类");
-            JTextArea noticeArea = createNoticeArea("就绪");
-            List<Category> categories = new ArrayList<>();
-
-            JPanel tablePanel = AppTheme.surface(new BorderLayout(0, 8));
-            JPanel tableHeading = new JPanel(new BorderLayout(8, 0));
-            tableHeading.setOpaque(false);
-            JLabel tableTitle = new JLabel("分类列表");
-            tableTitle.setFont(tableTitle.getFont().deriveFont(java.awt.Font.BOLD, 16f));
-            tableHeading.add(tableTitle, BorderLayout.WEST);
-            tableHeading.add(refreshButton, BorderLayout.EAST);
-            tablePanel.add(tableHeading, BorderLayout.NORTH);
-            tablePanel.add(AppTheme.scroll(table), BorderLayout.CENTER);
-
-            JPanel formPanel = AppTheme.surface(new BorderLayout(0, 12));
-            JPanel formFields = new JPanel();
-            formFields.setLayout(new javax.swing.BoxLayout(formFields, javax.swing.BoxLayout.Y_AXIS));
-            formFields.setOpaque(false);
-            JLabel formTitle = new JLabel("分类信息");
-            formTitle.setFont(formTitle.getFont().deriveFont(java.awt.Font.BOLD, 16f));
-            formTitle.setAlignmentX(Component.LEFT_ALIGNMENT);
-            selectedLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-            JLabel nameLabel = new JLabel("分类名称");
-            nameLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-            nameField.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
-            nameField.setAlignmentX(Component.LEFT_ALIGNMENT);
-            JLabel parentLabel = new JLabel("父分类");
-            parentLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-            parentBox.setMaximumSize(new Dimension(Integer.MAX_VALUE, 36));
-            parentBox.setAlignmentX(Component.LEFT_ALIGNMENT);
-            formFields.add(formTitle);
-            formFields.add(javax.swing.Box.createVerticalStrut(4));
-            formFields.add(selectedLabel);
-            formFields.add(javax.swing.Box.createVerticalStrut(18));
-            formFields.add(nameLabel);
-            formFields.add(javax.swing.Box.createVerticalStrut(6));
-            formFields.add(nameField);
-            formFields.add(javax.swing.Box.createVerticalStrut(14));
-            formFields.add(parentLabel);
-            formFields.add(javax.swing.Box.createVerticalStrut(6));
-            formFields.add(parentBox);
-            JPanel formActions = new JPanel(new java.awt.GridLayout(0, 1, 0, 8));
-            formActions.setOpaque(false);
-            formActions.add(addButton);
-            formActions.add(updateButton);
-            formActions.add(clearButton);
-            formActions.add(deleteButton);
-            formPanel.add(formFields, BorderLayout.CENTER);
-            formPanel.add(formActions, BorderLayout.SOUTH);
-
-            JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, tablePanel, formPanel);
-            splitPane.setResizeWeight(0.68);
-            splitPane.setDividerSize(6);
-            splitPane.setBorder(null);
-
-            JPanel page = createModulePage();
-            page.add(AppTheme.pageHeader("分类管理", "严格两级分类：一级归组，二级细分；仅一级分类可作为父分类"), BorderLayout.NORTH);
-            JPanel body = new JPanel(new BorderLayout());
-            body.setBackground(AppTheme.PAGE);
-            body.setBorder(javax.swing.BorderFactory.createEmptyBorder(12, 14, 12, 14));
-            body.add(splitPane, BorderLayout.CENTER);
-            page.add(body, BorderLayout.CENTER);
-
-            Runnable resetForm = () -> {
-                table.clearSelection();
-                nameField.setText("");
-                rebuildParentCategoryOptions(parentBox, categories, null, null);
-                selectedLabel.setText("新建分类");
-                updateButton.setEnabled(false);
-                deleteButton.setEnabled(false);
-                addButton.setEnabled(true);
-                nameField.requestFocusInWindow();
-                showNotice(noticeArea, "新建");
-            };
-            Runnable refresh = () -> loadCategoryRows(model, categories, parentBox, noticeArea);
-            refreshButton.addActionListener(event -> {
-                refresh.run();
-                resetForm.run();
-            });
-            table.getSelectionModel().addListSelectionListener(event -> {
-                int row = table.getSelectedRow();
-                if (!event.getValueIsAdjusting() && row >= 0) {
-                    Long categoryId = Long.valueOf(String.valueOf(model.getValueAt(row, 0)));
-                    Category category = categories.stream()
-                        .filter(candidate -> categoryId.equals(candidate.getCategoryId()))
-                        .findFirst().orElse(null);
-                    if (category != null) {
-                        nameField.setText(category.getName());
-                        rebuildParentCategoryOptions(parentBox, categories, categoryId, category.getParentId());
-                        selectedLabel.setText("正在编辑：" + categoryId + " - " + category.getName());
-                        updateButton.setEnabled(true);
-                        deleteButton.setEnabled(true);
-                        addButton.setEnabled(false);
-                        showNotice(noticeArea, "分类 #" + categoryId);
-                    }
-                }
-            });
-            clearButton.addActionListener(event -> resetForm.run());
-            addButton.addActionListener(event -> saveCategory(page, null, nameField.getText(), selectedParentId(parentBox), () -> {
-                refresh.run();
-                resetForm.run();
-            }));
-            updateButton.addActionListener(event -> {
-                int row = table.getSelectedRow();
-                if (row < 0) {
-                    JOptionPane.showMessageDialog(page, "请先选择分类。", "提示", JOptionPane.INFORMATION_MESSAGE);
-                    return;
-                }
-                saveCategory(page, Long.parseLong(String.valueOf(model.getValueAt(row, 0))),
-                    nameField.getText(), selectedParentId(parentBox), () -> {
-                        refresh.run();
-                        resetForm.run();
-                    });
-            });
-            deleteButton.addActionListener(event -> deleteSelectedCategory(table, model, () -> {
-                refresh.run();
-                resetForm.run();
-            }));
-            nameField.addActionListener(event -> {
-                if (updateButton.isEnabled()) {
-                    updateButton.doClick();
-                } else {
-                    addButton.doClick();
-                }
-            });
-
-            registerModulePage("分类管理", page);
-            refresh.run();
-            resetForm.run();
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
-        }
-    }
-
-    private void loadCategoryRows(DefaultTableModel model, List<Category> categories,
-                                  JComboBox<ParentCategoryOption> parentBox, JTextArea noticeArea) {
-        try {
-            categories.clear();
-            categories.addAll(categoryService.listCategories(currentUser));
-            java.util.Map<Long, String> categoryNames = new java.util.LinkedHashMap<>();
-            for (Category category : categories) {
-                categoryNames.put(category.getCategoryId(), category.getName());
-            }
-            categoryDisplayNames.clear();
-            categoryDisplayNames.putAll(CategoryDisplayUtil.buildDisplayNames(categories));
-            model.setRowCount(0);
-            for (Category category : categories) {
-                Category parent = category.getParentId() == null ? null : categories.stream()
-                    .filter(candidate -> category.getParentId().equals(candidate.getCategoryId()))
-                    .findFirst().orElse(null);
-                String parentDisplay = category.getParentId() == null ? "—"
-                    : category.getParentId() + " - " + categoryNames.getOrDefault(category.getParentId(), "未知分类");
-                String levelDisplay = category.getParentId() == null ? "一级分类"
-                    : parent == null || parent.getParentId() != null ? "层级异常" : "二级分类";
-                model.addRow(new Object[]{
-                    category.getCategoryId(),
-                    category.getName(),
-                    levelDisplay,
-                    parentDisplay
-                });
-            }
-            rebuildParentCategoryOptions(parentBox, categories, null, null);
-            if (isSelectedModule("分类管理")) {
-                centerArea.setText("分类管理：已加载 " + model.getRowCount() + " 个分类。");
-                rightArea.setText("当前分类数量：" + model.getRowCount());
-            }
-            showNotice(noticeArea, "分类数：" + model.getRowCount());
-        } catch (Exception ex) {
-            Component parent = SwingUtilities.getWindowAncestor(noticeArea);
-            JOptionPane.showMessageDialog(parent == null ? this : parent,
-                "加载分类失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
-        }
-    }
-
-    private void rebuildParentCategoryOptions(JComboBox<ParentCategoryOption> parentBox, List<Category> categories,
-                                              Long excludedCategoryId, Long selectedParentId) {
-        parentBox.removeAllItems();
-        parentBox.addItem(new ParentCategoryOption(null, "不选择（一级分类）"));
-        int selectedIndex = 0;
-        for (Category category : categories) {
-            if (category.getParentId() != null || category.getCategoryId().equals(excludedCategoryId)) {
-                continue;
-            }
-            parentBox.addItem(new ParentCategoryOption(category.getCategoryId(), category.getName()));
-            if (category.getCategoryId().equals(selectedParentId)) {
-                selectedIndex = parentBox.getItemCount() - 1;
-            }
-        }
-        parentBox.setSelectedIndex(selectedIndex);
-    }
-
-    private Long selectedParentId(JComboBox<ParentCategoryOption> parentBox) {
-        ParentCategoryOption selected = (ParentCategoryOption) parentBox.getSelectedItem();
-        return selected == null ? null : selected.categoryId();
-    }
-
-    private void saveCategory(Component parent, Long categoryId, String name, Long parentId, Runnable refresh) {
-        try {
-            if (name == null || name.isBlank()) {
-                throw new IllegalArgumentException("分类名称不能为空");
-            }
-            if (categoryId == null) {
-                categoryService.createCategory(currentUser, name, parentId);
-            } else {
-                categoryService.updateCategory(currentUser, categoryId, name, parentId);
-            }
-            refresh.run();
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(parent, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
-        }
-    }
-
-    private void deleteSelectedCategory(JTable table, DefaultTableModel model, Runnable refresh) {
-        Component parent = SwingUtilities.getWindowAncestor(table);
-        if (parent == null) {
-            parent = this;
-        }
-        int row = table.getSelectedRow();
-        if (row < 0) {
-            JOptionPane.showMessageDialog(parent, "请先选择分类。", "提示", JOptionPane.INFORMATION_MESSAGE);
+        if (focusExistingModulePage("分类管理")) {
             return;
         }
-        Long categoryId = Long.parseLong(String.valueOf(model.getValueAt(row, 0)));
-        try {
-            int confirm = JOptionPane.showConfirmDialog(parent, "确认删除分类 " + categoryId + "？",
-                "删除确认", JOptionPane.YES_NO_OPTION);
-            if (confirm == JOptionPane.YES_OPTION) {
-                categoryService.deleteCategory(currentUser, categoryId);
-                refresh.run();
-            }
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(parent, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
-        }
+        CategoryManagementPanel panel = new CategoryManagementPanel(currentUser, categoryService,
+            categoryDisplayNames::clear, message -> {
+                if (isSelectedModule("分类管理")) {
+                    centerArea.setText(message);
+                    rightArea.setText("分类结构与工单影响已同步");
+                }
+            });
+        registerModulePage("分类管理", panel);
     }
 
     private String statusText(Integer status) {
@@ -1692,12 +1738,14 @@ public class AdminWorkbenchPanel extends JPanel {
             case 2 -> "已完成";
             case 3 -> "已关闭";
             case 4 -> "已取消";
+            case CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION -> "待确认";
             default -> "未知(" + status + ")";
         };
     }
 
     private String roleText(String role) {
         return switch (role == null ? "" : role) {
+            case "ROOT" -> "系统所有者";
             case "ADMIN" -> "管理员";
             case "USER" -> "普通用户";
             default -> role == null ? "" : role;
@@ -1711,12 +1759,9 @@ public class AdminWorkbenchPanel extends JPanel {
         return switch (status) {
             case 0 -> new TicketStatusOption[]{
                 new TicketStatusOption(1, "处理中"),
-                new TicketStatusOption(2, "已完成"),
-                new TicketStatusOption(3, "已关闭"),
                 new TicketStatusOption(4, "已取消")};
             case 1 -> new TicketStatusOption[]{
                 new TicketStatusOption(2, "已完成"),
-                new TicketStatusOption(3, "已关闭"),
                 new TicketStatusOption(4, "已取消")};
             case 2 -> new TicketStatusOption[]{new TicketStatusOption(3, "已关闭")};
             default -> new TicketStatusOption[0];
@@ -1761,8 +1806,13 @@ public class AdminWorkbenchPanel extends JPanel {
 
     public void bindUser(User user) {
         this.currentUser = user;
-        headerLabel.setText("管理员 · " + user.getUsername());
-        showAdminHome();
+        headerLabel.setText(roleText(user.getRole()) + " · " + user.getUsername());
+        updateNavigationForRole();
+        if ("ROOT".equals(user.getRole())) {
+            openModule("权限管理");
+        } else {
+            showAdminHome();
+        }
     }
 
     /** 退出时停止当前模块后台任务并清除当前会话展示。 */
@@ -1825,6 +1875,373 @@ public class AdminWorkbenchPanel extends JPanel {
         }
     }
 
+    private void showPermissionManager() {
+        if (focusExistingModulePage("权限管理")) {
+            return;
+        }
+        User root = currentUser;
+        UserService.requireRoot(root);
+        DefaultTableModel model = new DefaultTableModel(
+            new Object[]{"用户ID", "用户名", "邮箱", "角色", "状态", "密码状态", "创建时间"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        JTable table = new JTable(model);
+        AppTheme.styleTable(table);
+        table.setAutoCreateRowSorter(true);
+        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        table.getColumnModel().getColumn(0).setMaxWidth(90);
+        table.getColumnModel().getColumn(3).setMaxWidth(120);
+        table.getColumnModel().getColumn(4).setMaxWidth(90);
+
+        JButton createButton = new JButton("创建后台账号");
+        JButton changeRoleButton = new JButton("调整角色");
+        JButton refreshButton = new JButton("刷新");
+        AppTheme.primary(createButton);
+        AppTheme.secondary(changeRoleButton);
+        AppTheme.secondary(refreshButton);
+        changeRoleButton.setEnabled(false);
+        JLabel summaryLabel = AppTheme.muted("正在加载权限账号…");
+        List<User> accounts = new ArrayList<>();
+
+        JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 4));
+        toolbar.setOpaque(false);
+        toolbar.add(createButton);
+        toolbar.add(changeRoleButton);
+        toolbar.add(refreshButton);
+
+        JPanel page = createModulePage();
+        page.add(AppTheme.pageHeader("权限管理", "创建后台账号、调整角色并保护系统所有者连续性"), BorderLayout.NORTH);
+        JPanel body = new JPanel(new BorderLayout(0, 10));
+        body.setBackground(AppTheme.PAGE);
+        body.setBorder(javax.swing.BorderFactory.createEmptyBorder(0, 14, 12, 14));
+        JPanel toolbarCard = AppTheme.surface(new BorderLayout());
+        toolbarCard.add(toolbar, BorderLayout.WEST);
+        toolbarCard.add(summaryLabel, BorderLayout.EAST);
+        body.add(toolbarCard, BorderLayout.NORTH);
+        JPanel listCard = AppTheme.surface(new BorderLayout(0, 8));
+        listCard.add(new JLabel("ROOT / ADMIN 账号"), BorderLayout.NORTH);
+        listCard.add(AppTheme.scroll(table), BorderLayout.CENTER);
+        listCard.add(AppTheme.muted("任何角色不能操作自己；最后一个有效 ROOT 不能被禁用或降级。"), BorderLayout.SOUTH);
+        body.add(listCard, BorderLayout.CENTER);
+        page.add(body, BorderLayout.CENTER);
+
+        Runnable render = () -> {
+            model.setRowCount(0);
+            for (User account : accounts) {
+                if ("USER".equals(account.getRole())) {
+                    continue;
+                }
+                model.addRow(new Object[]{account.getUserId(), account.getUsername(), account.getEmail(),
+                    roleText(account.getRole()), Integer.valueOf(1).equals(account.getStatus()) ? "已启用" : "已禁用",
+                    Integer.valueOf(1).equals(account.getMustChangePassword()) ? "待首次换密" : "正常",
+                    TimeFormatUtil.format(account.getCreatedAt())});
+            }
+            long activeRoots = accounts.stream().filter(account -> "ROOT".equals(account.getRole()))
+                .filter(account -> Integer.valueOf(1).equals(account.getStatus())).count();
+            summaryLabel.setText("后台账号 " + model.getRowCount() + " · 有效 ROOT " + activeRoots);
+            table.clearSelection();
+            changeRoleButton.setEnabled(false);
+        };
+
+        Runnable load = () -> {
+            refreshButton.setEnabled(false);
+            new SwingWorker<List<User>, Void>() {
+                @Override
+                protected List<User> doInBackground() {
+                    return userService.listUsers(root);
+                }
+
+                @Override
+                protected void done() {
+                    if (root != currentUser) {
+                        return;
+                    }
+                    try {
+                        accounts.clear();
+                        accounts.addAll(get());
+                        render.run();
+                    } catch (Exception ex) {
+                        Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+                        JOptionPane.showMessageDialog(page, cause.getMessage(), "加载失败", JOptionPane.WARNING_MESSAGE);
+                    } finally {
+                        refreshButton.setEnabled(true);
+                    }
+                }
+            }.execute();
+        };
+
+        table.getSelectionModel().addListSelectionListener(event -> {
+            if (!event.getValueIsAdjusting()) {
+                int row = table.getSelectedRow();
+                if (row < 0) {
+                    changeRoleButton.setEnabled(false);
+                    return;
+                }
+                Long userId = Long.valueOf(String.valueOf(table.getValueAt(row, 0)));
+                changeRoleButton.setEnabled(!root.getUserId().equals(userId));
+            }
+        });
+        createButton.addActionListener(event -> createManagedAccount(page, createButton, load));
+        changeRoleButton.addActionListener(event -> changeSelectedRole(page, table, changeRoleButton, load));
+        refreshButton.addActionListener(event -> load.run());
+        registerModulePage("权限管理", page);
+        load.run();
+    }
+
+    private void createManagedAccount(Component parent, JButton button, Runnable reload) {
+        User actor = currentUser;
+        JTextField username = new JTextField(20);
+        JTextField email = new JTextField(20);
+        JTextField phone = new JTextField(20);
+        JComboBox<UserRole> role = new JComboBox<>(new UserRole[]{UserRole.ROOT, UserRole.ADMIN});
+        role.setSelectedItem(UserRole.ADMIN);
+        JTextField reason = new JTextField(20);
+        for (JTextField field : new JTextField[]{username, email, phone, reason}) {
+            AppTheme.styleInput(field);
+            field.setPreferredSize(new Dimension(330, 36));
+        }
+        AppTheme.styleComboBox(role);
+        role.setPreferredSize(new Dimension(330, 36));
+
+        JPanel form = new JPanel(new java.awt.GridBagLayout());
+        form.setOpaque(false);
+        addAccountFormRow(form, 0, "用户名", username);
+        addAccountFormRow(form, 1, "邮箱", email);
+        addAccountFormRow(form, 2, "手机号", phone);
+        addAccountFormRow(form, 3, "角色", role);
+        addAccountFormRow(form, 4, "创建原因", reason);
+
+        JLabel status = AppTheme.muted("填写完成后创建；失败时窗口和已填内容会保留。");
+        JButton cancel = new JButton("取消");
+        JButton submit = new JButton("创建账号");
+        AppTheme.secondary(cancel);
+        AppTheme.primary(submit);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
+        actions.setOpaque(false);
+        actions.add(cancel);
+        actions.add(submit);
+
+        JPanel content = new JPanel(new BorderLayout(0, 16));
+        content.setBackground(AppTheme.PAGE);
+        content.setBorder(javax.swing.BorderFactory.createEmptyBorder(20, 24, 18, 24));
+        JPanel heading = new JPanel(new BorderLayout(0, 5));
+        heading.setOpaque(false);
+        JLabel title = new JLabel("创建后台账号");
+        title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 20f));
+        heading.add(title, BorderLayout.NORTH);
+        heading.add(AppTheme.muted("临时密码仅显示一次，新账号首次登录必须修改密码。"), BorderLayout.CENTER);
+        JPanel center = AppTheme.surface(new BorderLayout(0, 12));
+        center.add(form, BorderLayout.CENTER);
+        center.add(status, BorderLayout.SOUTH);
+        content.add(heading, BorderLayout.NORTH);
+        content.add(center, BorderLayout.CENTER);
+        content.add(actions, BorderLayout.SOUTH);
+
+        JDialog dialog = new JDialog(mainFrame, "创建后台账号", true);
+        WindowIconUtil.apply(dialog);
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dialog.setContentPane(content);
+        dialog.setResizable(false);
+        AppTheme.closeOnEscape(dialog);
+        dialog.getRootPane().setDefaultButton(submit);
+        cancel.addActionListener(event -> dialog.dispose());
+        submit.addActionListener(event -> {
+            UserRole selectedRole = (UserRole) role.getSelectedItem();
+            submit.setEnabled(false);
+            cancel.setEnabled(false);
+            status.setForeground(AppTheme.PRIMARY);
+            status.setText("正在创建账号…");
+            new SwingWorker<UserService.ManagedAccountResult, Void>() {
+                @Override
+                protected UserService.ManagedAccountResult doInBackground() {
+                    return userService.createManagedAccount(actor, username.getText(), email.getText(), phone.getText(),
+                        selectedRole == null ? null : selectedRole.name(), reason.getText());
+                }
+
+                @Override
+                protected void done() {
+                    if (actor != currentUser) {
+                        dialog.dispose();
+                        return;
+                    }
+                    try {
+                        UserService.ManagedAccountResult result = get();
+                        dialog.dispose();
+                        showTemporaryPassword(parent, result.user().getUsername(), result.temporaryPassword());
+                        reload.run();
+                    } catch (Exception ex) {
+                        status.setForeground(AppTheme.DANGER);
+                        status.setText("创建失败：" + rootMessage(ex));
+                        submit.setEnabled(true);
+                        cancel.setEnabled(true);
+                        username.requestFocusInWindow();
+                    }
+                }
+            }.execute();
+        });
+
+        button.setEnabled(false);
+        dialog.pack();
+        dialog.setSize(new Dimension(570, 465));
+        dialog.setLocationRelativeTo(parent);
+        SwingUtilities.invokeLater(username::requestFocusInWindow);
+        dialog.setVisible(true);
+        button.setEnabled(true);
+    }
+
+    private void addAccountFormRow(JPanel form, int row, String labelText, javax.swing.JComponent field) {
+        java.awt.GridBagConstraints labelConstraints = new java.awt.GridBagConstraints();
+        labelConstraints.gridx = 0;
+        labelConstraints.gridy = row;
+        labelConstraints.anchor = java.awt.GridBagConstraints.WEST;
+        labelConstraints.insets = new java.awt.Insets(5, 2, 5, 16);
+        form.add(new JLabel(labelText), labelConstraints);
+
+        java.awt.GridBagConstraints fieldConstraints = new java.awt.GridBagConstraints();
+        fieldConstraints.gridx = 1;
+        fieldConstraints.gridy = row;
+        fieldConstraints.weightx = 1;
+        fieldConstraints.fill = java.awt.GridBagConstraints.HORIZONTAL;
+        fieldConstraints.insets = new java.awt.Insets(5, 0, 5, 2);
+        form.add(field, fieldConstraints);
+    }
+
+    private void changeSelectedRole(Component parent, JTable table, JButton button, Runnable reload) {
+        User actor = currentUser;
+        int row = table.getSelectedRow();
+        if (row < 0) {
+            return;
+        }
+        Long userId = Long.valueOf(String.valueOf(table.getValueAt(row, 0)));
+        String username = String.valueOf(table.getValueAt(row, 1));
+        String displayedRole = String.valueOf(table.getValueAt(row, 3));
+        JComboBox<UserRole> role = new JComboBox<>(new UserRole[]{UserRole.ROOT, UserRole.ADMIN});
+        for (UserRole candidate : UserRole.values()) {
+            if (roleText(candidate.name()).equals(displayedRole)) {
+                role.setSelectedItem(candidate);
+                break;
+            }
+        }
+        JTextField reason = new JTextField(20);
+        AppTheme.styleComboBox(role);
+        AppTheme.styleInput(reason);
+        role.setPreferredSize(new Dimension(330, 36));
+        reason.setPreferredSize(new Dimension(330, 36));
+        JPanel form = new JPanel(new java.awt.GridBagLayout());
+        form.setBorder(javax.swing.BorderFactory.createEmptyBorder(8, 10, 8, 10));
+        addAccountFormRow(form, 0, "目标账号", new JLabel(username));
+        addAccountFormRow(form, 1, "新角色", role);
+        addAccountFormRow(form, 2, "调整原因", reason);
+        if (JOptionPane.showConfirmDialog(parent, form, "调整角色",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.OK_OPTION) {
+            return;
+        }
+        String password = "系统所有者".equals(displayedRole) ? promptCurrentPassword(parent) : null;
+        if ("系统所有者".equals(displayedRole) && password == null) {
+            return;
+        }
+        UserRole selectedRole = (UserRole) role.getSelectedItem();
+        button.setEnabled(false);
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                userService.changeUserRole(actor, userId, selectedRole == null ? null : selectedRole.name(),
+                    reason.getText(), password);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                if (actor != currentUser) {
+                    return;
+                }
+                try {
+                    get();
+                    JOptionPane.showMessageDialog(parent, "角色已更新。", "操作成功", JOptionPane.INFORMATION_MESSAGE);
+                    reload.run();
+                } catch (Exception ex) {
+                    Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+                    JOptionPane.showMessageDialog(parent, cause.getMessage(), "角色调整失败", JOptionPane.WARNING_MESSAGE);
+                } finally {
+                    button.setEnabled(true);
+                }
+            }
+        }.execute();
+    }
+
+    private String promptCurrentPassword(Component parent) {
+        JPasswordField field = new JPasswordField(20);
+        AppTheme.styleInput(field);
+        if (JOptionPane.showConfirmDialog(parent, field, "ROOT 敏感操作 · 重新输入当前密码",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE) != JOptionPane.OK_OPTION) {
+            return null;
+        }
+        String password = new String(field.getPassword());
+        field.setText("");
+        return password;
+    }
+
+    private void showTemporaryPassword(Component parent, String username, String password) {
+        showTemporaryPassword(parent, "后台账号已创建", username, password);
+    }
+
+    private void showTemporaryPassword(Component parent, String dialogTitle, String username, String password) {
+        JTextField passwordField = new JTextField(password);
+        passwordField.setEditable(false);
+        passwordField.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.BOLD, 16));
+        AppTheme.styleInput(passwordField);
+        passwordField.setPreferredSize(new Dimension(500, 40));
+        passwordField.setCaretPosition(0);
+
+        JLabel title = new JLabel("临时密码（仅显示本次）");
+        title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 20f));
+        JLabel account = new JLabel("账号：" + username);
+        account.setFont(account.getFont().deriveFont(java.awt.Font.PLAIN, 14f));
+        JPanel heading = new JPanel(new BorderLayout(0, 6));
+        heading.setOpaque(false);
+        heading.add(title, BorderLayout.NORTH);
+        heading.add(account, BorderLayout.SOUTH);
+
+        JPanel passwordCard = AppTheme.surface(new BorderLayout(0, 8));
+        passwordCard.add(new JLabel("临时密码"), BorderLayout.NORTH);
+        passwordCard.add(passwordField, BorderLayout.CENTER);
+
+        JLabel hint = AppTheme.muted("用户使用该密码登录后，系统会强制其立即设置个人新密码。请通过安全渠道交付。");
+        JButton confirm = new JButton("确定");
+        AppTheme.primary(confirm);
+        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 0, 0));
+        actions.setOpaque(false);
+        actions.add(confirm);
+
+        JPanel body = new JPanel(new BorderLayout(0, 14));
+        body.setBackground(AppTheme.PAGE);
+        body.setBorder(javax.swing.BorderFactory.createEmptyBorder(20, 24, 18, 24));
+        body.add(heading, BorderLayout.NORTH);
+        JPanel center = new JPanel(new BorderLayout(0, 12));
+        center.setOpaque(false);
+        center.add(passwordCard, BorderLayout.NORTH);
+        center.add(hint, BorderLayout.SOUTH);
+        body.add(center, BorderLayout.CENTER);
+        body.add(actions, BorderLayout.SOUTH);
+
+        JDialog dialog = new JDialog(mainFrame, dialogTitle, true);
+        WindowIconUtil.apply(dialog);
+        dialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        dialog.setContentPane(body);
+        dialog.setResizable(false);
+        AppTheme.closeOnEscape(dialog);
+        dialog.getRootPane().setDefaultButton(confirm);
+        confirm.addActionListener(event -> dialog.dispose());
+        dialog.pack();
+        dialog.setSize(new Dimension(620, 300));
+        dialog.setLocationRelativeTo(parent);
+        SwingUtilities.invokeLater(confirm::requestFocusInWindow);
+        dialog.setVisible(true);
+    }
+
     private void showUserManager() {
         if (focusExistingModulePage("用户管理")) {
             return;
@@ -1864,7 +2281,11 @@ public class AdminWorkbenchPanel extends JPanel {
 
         JTextField keywordField = new JTextField(16);
         JComboBox<String> statusFilter = new JComboBox<>(new String[]{"全部状态", "已启用", "已禁用"});
+        JComboBox<String> roleFilter = new JComboBox<>(new String[]{
+            "全部角色", "ROOT · 系统所有者", "ADMIN · 管理员", "USER · 普通用户"
+        });
         AppTheme.styleComboBox(statusFilter);
+        AppTheme.styleComboBox(roleFilter);
         AppTheme.styleInput(keywordField);
         JButton searchButton = new JButton("筛选");
         JButton resetButton = new JButton("重置");
@@ -1897,6 +2318,8 @@ public class AdminWorkbenchPanel extends JPanel {
         toolbar.add(keywordField);
         toolbar.add(new JLabel("状态"));
         toolbar.add(statusFilter);
+        toolbar.add(new JLabel("角色"));
+        toolbar.add(roleFilter);
         toolbar.add(searchButton);
         toolbar.add(resetButton);
         toolbar.add(refreshButton);
@@ -1960,6 +2383,12 @@ public class AdminWorkbenchPanel extends JPanel {
         Runnable renderUsers = () -> {
             String keyword = keywordField.getText() == null ? "" : keywordField.getText().trim().toLowerCase();
             int selectedStatus = statusFilter.getSelectedIndex();
+            String selectedRole = switch (roleFilter.getSelectedIndex()) {
+                case 1 -> "ROOT";
+                case 2 -> "ADMIN";
+                case 3 -> "USER";
+                default -> null;
+            };
             model.setRowCount(0);
             for (User user : loadedUsers) {
                 boolean statusMatches = selectedStatus == 0
@@ -1968,7 +2397,8 @@ public class AdminWorkbenchPanel extends JPanel {
                 boolean keywordMatches = keyword.isBlank()
                     || nullToEmpty(user.getUsername()).toLowerCase().contains(keyword)
                     || nullToEmpty(user.getEmail()).toLowerCase().contains(keyword);
-                if (statusMatches && keywordMatches) {
+                boolean roleMatches = selectedRole == null || selectedRole.equals(user.getRole());
+                if (statusMatches && roleMatches && keywordMatches) {
                     model.addRow(new Object[]{user.getUserId(), user.getUsername(), user.getEmail(), user.getPhone(),
                         roleText(user.getRole()), Integer.valueOf(1).equals(user.getStatus()) ? "已启用" : "已禁用",
                         Integer.valueOf(1).equals(user.getMustChangePassword()) ? "待首次换密" : "正常",
@@ -1976,6 +2406,7 @@ public class AdminWorkbenchPanel extends JPanel {
                 }
             }
             long enabledCount = loadedUsers.stream().filter(user -> Integer.valueOf(1).equals(user.getStatus())).count();
+            statusLabel.setForeground(AppTheme.MUTED);
             statusLabel.setText("共 " + loadedUsers.size() + " · 启用 " + enabledCount
                 + " · 禁用 " + (loadedUsers.size() - enabledCount) + " · 显示 " + model.getRowCount());
             clearSelectedUser.run();
@@ -1983,6 +2414,7 @@ public class AdminWorkbenchPanel extends JPanel {
 
         Runnable loadUsers = () -> {
             refreshButton.setEnabled(false);
+            statusLabel.setForeground(AppTheme.MUTED);
             statusLabel.setText("用户列表加载中…");
             new SwingWorker<List<User>, Void>() {
                 @Override
@@ -2002,8 +2434,8 @@ public class AdminWorkbenchPanel extends JPanel {
                         centerArea.setText("用户管理：共 " + loadedUsers.size() + " 个账号。可在右侧工作区筛选并调整账号状态。");
                         rightArea.setText("账号状态变更会调用 UserService 权限校验，并写入系统审计日志。");
                     } catch (Exception ex) {
-                        statusLabel.setText("用户列表加载失败");
-                        JOptionPane.showMessageDialog(page, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+                        statusLabel.setForeground(AppTheme.DANGER);
+                        statusLabel.setText("用户列表加载失败：" + rootMessage(ex));
                     } finally {
                         refreshButton.setEnabled(true);
                     }
@@ -2022,6 +2454,10 @@ public class AdminWorkbenchPanel extends JPanel {
                 String username = String.valueOf(userTable.getValueAt(row, 1));
                 String status = String.valueOf(userTable.getValueAt(row, 5));
                 boolean currentAccount = manager != null && manager.getUserId().equals(userId);
+                User target = loadedUsers.stream().filter(user -> userId.equals(user.getUserId())).findFirst().orElse(null);
+                boolean manageable = UserService.canManageAccount(manager, target);
+                boolean lowerRole = target != null && manager != null
+                    && UserRole.from(target.getRole()).isLowerThan(UserRole.from(manager.getRole()));
                 selectedTitle.setText(username + (currentAccount ? "（当前账号）" : ""));
                 selectedDetails.setForeground(AppTheme.TEXT);
                 selectedDetails.setText("用户 ID：" + userId
@@ -2031,17 +2467,19 @@ public class AdminWorkbenchPanel extends JPanel {
                     + "\n手机号：" + nullToEmpty(userTable.getValueAt(row, 3))
                     + "\n密码状态：" + nullToEmpty(userTable.getValueAt(row, 6))
                     + "\n创建时间：" + nullToEmpty(userTable.getValueAt(row, 7)));
-                enableButton.setEnabled("已禁用".equals(status));
-                disableButton.setEnabled("已启用".equals(status) && !currentAccount);
-                resetPasswordButton.setEnabled(!currentAccount);
+                enableButton.setEnabled(manageable && "已禁用".equals(status));
+                disableButton.setEnabled(manageable && "已启用".equals(status) && !currentAccount);
+                resetPasswordButton.setEnabled(lowerRole && !currentAccount);
             }
         });
         searchButton.addActionListener(event -> renderUsers.run());
         keywordField.addActionListener(event -> renderUsers.run());
         statusFilter.addActionListener(event -> renderUsers.run());
+        roleFilter.addActionListener(event -> renderUsers.run());
         resetButton.addActionListener(event -> {
             keywordField.setText("");
             statusFilter.setSelectedIndex(0);
+            roleFilter.setSelectedIndex(0);
             renderUsers.run();
         });
         refreshButton.addActionListener(event -> loadUsers.run());
@@ -2087,16 +2525,7 @@ public class AdminWorkbenchPanel extends JPanel {
                 }
                 try {
                     String temporaryPassword = get();
-                    JTextField passwordField = new JTextField(temporaryPassword, 24);
-                    passwordField.setEditable(false);
-                    passwordField.setFont(new java.awt.Font(java.awt.Font.MONOSPACED, java.awt.Font.BOLD, 15));
-                    AppTheme.styleInput(passwordField);
-                    JPanel resultPanel = new JPanel(new BorderLayout(0, 10));
-                    resultPanel.setOpaque(false);
-                    resultPanel.add(new JLabel("临时密码（仅显示本次，请安全交给用户）："), BorderLayout.NORTH);
-                    resultPanel.add(passwordField, BorderLayout.CENTER);
-                    resultPanel.add(AppTheme.muted("用户使用该密码登录后，系统会强制其立即设置个人新密码。"), BorderLayout.SOUTH);
-                    JOptionPane.showMessageDialog(parent, resultPanel, "密码已重置", JOptionPane.INFORMATION_MESSAGE);
+                    showTemporaryPassword(parent, "密码已重置", username, temporaryPassword);
                     reload.run();
                 } catch (Exception ex) {
                     Throwable cause = ex.getCause() == null ? ex : ex.getCause();
@@ -2122,15 +2551,33 @@ public class AdminWorkbenchPanel extends JPanel {
             return;
         }
         String action = status == 1 ? "启用" : "禁用";
+        String reason = JOptionPane.showInputDialog(parent, "请输入" + action + "账号的原因：", action + "原因",
+            JOptionPane.QUESTION_MESSAGE);
+        if (reason == null) {
+            return;
+        }
+        String currentPassword = null;
+        if ("系统所有者".equals(String.valueOf(table.getValueAt(row, 4)))) {
+            JPasswordField passwordField = new JPasswordField(20);
+            AppTheme.styleInput(passwordField);
+            int passwordResult = JOptionPane.showConfirmDialog(parent, passwordField,
+                "ROOT 敏感操作 · 重新输入当前密码", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (passwordResult != JOptionPane.OK_OPTION) {
+                return;
+            }
+            currentPassword = new String(passwordField.getPassword());
+            passwordField.setText("");
+        }
         int confirm = JOptionPane.showConfirmDialog(parent, "确定要" + action + "账号“" + username + "”吗？",
             action + "账号", JOptionPane.YES_NO_OPTION, status == 1 ? JOptionPane.QUESTION_MESSAGE : JOptionPane.WARNING_MESSAGE);
         if (confirm != JOptionPane.YES_OPTION) {
             return;
         }
+        String verifiedPassword = currentPassword;
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() {
-                userService.changeUserStatus(manager, userId, status);
+                userService.changeUserStatus(manager, userId, status, reason, verifiedPassword);
                 return null;
             }
 
@@ -2144,7 +2591,8 @@ public class AdminWorkbenchPanel extends JPanel {
                     JOptionPane.showMessageDialog(parent, "账号已" + action + "。", "操作成功", JOptionPane.INFORMATION_MESSAGE);
                     reload.run();
                 } catch (Exception ex) {
-                    JOptionPane.showMessageDialog(parent, "账号状态更新失败：" + ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+                    Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+                    JOptionPane.showMessageDialog(parent, "账号状态更新失败：" + cause.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
                 }
             }
         }.execute();
@@ -2273,7 +2721,6 @@ public class AdminWorkbenchPanel extends JPanel {
                             overallValue.setForeground(AppTheme.DANGER);
                             centerArea.setText(message);
                             rightArea.setText("系统状态：自检未完成");
-                            JOptionPane.showMessageDialog(page, message, "提示", JOptionPane.WARNING_MESSAGE);
                         } finally {
                             rerunButton.setEnabled(true);
                         }
@@ -2606,13 +3053,6 @@ public class AdminWorkbenchPanel extends JPanel {
                                   java.util.Map<Long, String> categoryDisplayNames) {
     }
 
-    private record ParentCategoryOption(Long categoryId, String name) {
-        @Override
-        public String toString() {
-            return categoryId == null ? name : categoryId + " - " + name;
-        }
-    }
-
     private record AdminOption(User user) {
         @Override
         public String toString() {
@@ -2631,6 +3071,7 @@ public class AdminWorkbenchPanel extends JPanel {
         ALL,
         UNASSIGNED,
         MINE,
+        PENDING_MINE,
         ADMIN
     }
 
@@ -2653,7 +3094,7 @@ public class AdminWorkbenchPanel extends JPanel {
             return;
         }
         JPanel page = createModulePage();
-        page.add(AppTheme.pageHeader("批量维护", "集中处理长期未响应的待处理工单"), BorderLayout.NORTH);
+        page.add(AppTheme.pageHeader("批量维护", "仅处理当前账号负责且没有待确认转派的超时工单"), BorderLayout.NORTH);
 
         JPanel body = new JPanel(new BorderLayout(0, 14));
         body.setBackground(AppTheme.PAGE);
@@ -2661,7 +3102,7 @@ public class AdminWorkbenchPanel extends JPanel {
         JPanel card = AppTheme.surface(new BorderLayout(0, 16));
         JLabel title = new JLabel("取消超时待处理工单");
         title.setFont(title.getFont().deriveFont(java.awt.Font.BOLD, 18f));
-        JTextArea description = new JTextArea("时间范围：30 天前\n源状态：待处理\n目标状态：已取消");
+        JTextArea description = new JTextArea("范围：当前账号负责、无待确认转派\n时间范围：30 天前\n源状态：待处理\n目标状态：已取消");
         configureReadOnlyArea(description);
         description.setOpaque(false);
         description.setForeground(AppTheme.MUTED);
@@ -2685,7 +3126,7 @@ public class AdminWorkbenchPanel extends JPanel {
     private void batchCancelStalePendingOrders(JLabel resultLabel) {
         int confirm = JOptionPane.showConfirmDialog(
             this,
-            "将把 30 天前仍为待处理的工单批量流转为已取消，是否继续？",
+            "将把当前账号负责、无待确认转派且 30 天前仍为待处理的工单批量流转为已取消，是否继续？",
             "批处理确认",
             JOptionPane.YES_NO_OPTION
         );
@@ -2701,9 +3142,10 @@ public class AdminWorkbenchPanel extends JPanel {
             resultLabel.setText(message);
             rightArea.setText(message);
         } catch (Exception ex) {
+            String message = "执行失败：" + rootMessage(ex);
             resultLabel.setForeground(AppTheme.DANGER);
-            resultLabel.setText("执行失败：" + ex.getMessage());
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            resultLabel.setText(message);
+            rightArea.setText(message);
         }
     }
 }

@@ -5,12 +5,21 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Comment {
+    private String eventId;
     private String userId;
     private String itemId;
     private String content;
     private String rating;
     private List<String> tags = new ArrayList<>();
     private Instant createdAt;
+
+    public String getEventId() {
+        return eventId;
+    }
+
+    public void setEventId(String eventId) {
+        this.eventId = eventId;
+    }
 
     public String getUserId() {
         return userId;

@@ -18,7 +18,7 @@ public class MainFrame extends JFrame {
     private final AdminWorkbenchPanel adminWorkbenchPanel = new AdminWorkbenchPanel(this);
 
     public MainFrame() {
-        super("工单管理系统");
+        super(windowTitle());
         WindowIconUtil.apply(this);
         this.loginPanel = new LoginPanel(this);
         setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
@@ -32,8 +32,16 @@ public class MainFrame extends JFrame {
         cardLayout.show(rootPanel, "login");
     }
 
+    private static String windowTitle() {
+        String instanceId = System.getenv("TICKET_INSTANCE_ID");
+        if (instanceId == null || instanceId.isBlank()) {
+            return "工单管理系统";
+        }
+        return "工单管理系统 · 窗口 " + instanceId.trim();
+    }
+
     public void onLoginSuccess(User user) {
-        if ("ADMIN".equals(user.getRole())) {
+        if ("ROOT".equals(user.getRole()) || "ADMIN".equals(user.getRole())) {
             adminWorkbenchPanel.bindUser(user);
             cardLayout.show(rootPanel, "admin");
         } else {
