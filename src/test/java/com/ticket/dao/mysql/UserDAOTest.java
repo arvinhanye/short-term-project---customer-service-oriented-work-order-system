@@ -85,6 +85,9 @@ class UserDAOTest {
         Assertions.assertEquals("13700003333", finalUser.getPhone());
         Assertions.assertEquals(1, finalUser.getStatus());
         Assertions.assertEquals(finalHash, finalUser.getPasswordHash());
+        Assertions.assertNull(userDAO.findAllPublic().get(0).getPasswordHash());
+        Assertions.assertEquals(1, userDAO.findActiveAdminsPublic().size());
+        Assertions.assertNull(userDAO.findActiveAdminsPublic().get(0).getPasswordHash());
 
         LocalDateTime lockedUntil = LocalDateTime.of(2026, 7, 7, 9, 0);
         Assertions.assertEquals(1, userDAO.updateLoginSecurity(userId, 5, lockedUntil));
@@ -125,6 +128,19 @@ class UserDAOTest {
     void shouldRejectWeakPassword() {
         Assertions.assertThrows(RuntimeException.class, () -> PasswordUtil.hashPassword("simple1"));
         Assertions.assertFalse(PasswordUtil.matches("RiverStone#123", null));
+    }
+
+    @Test
+    void shouldProtectLastActiveRootDuringStatusAndRoleUpdates() {
+        long firstRoot = userDAO.insert(buildUser("root_a", "root.a@ticket.local", "13800001001", "ROOT", 1));
+        long secondRoot = userDAO.insert(buildUser("root_b", "root.b@ticket.local", "13800001002", "ROOT", 1));
+
+        Assertions.assertEquals(1, userDAO.updateStatusWithRootProtection(firstRoot, 0));
+        Assertions.assertEquals(-1, userDAO.updateStatusWithRootProtection(secondRoot, 0));
+        Assertions.assertEquals(-1, userDAO.updateRoleWithRootProtection(secondRoot, "ADMIN"));
+        Assertions.assertEquals(1, userDAO.updateStatusWithRootProtection(firstRoot, 1));
+        Assertions.assertEquals(1, userDAO.updateRoleWithRootProtection(secondRoot, "ADMIN"));
+        Assertions.assertEquals(1, userDAO.countActiveByRole("ROOT"));
     }
 
     private User buildUser(String username, String email, String phone, String role, int status) {

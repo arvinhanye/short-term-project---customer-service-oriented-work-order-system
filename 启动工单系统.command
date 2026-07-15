@@ -11,7 +11,8 @@ else
     PROJECT_DIR="${SCRIPT_DIR}/ticket-management"
 fi
 JAR_PATH="${PROJECT_DIR}/target/ticket-management.jar"
-ALWAYS_BUILD="${ALWAYS_BUILD:-1}"
+ALWAYS_BUILD="${ALWAYS_BUILD:-0}"
+export TICKET_INSTANCE_ID="${TICKET_INSTANCE_ID:-$$}"
 MYSQL_HOST="127.0.0.1"
 MYSQL_PORT="3306"
 MYSQL_APP_USER="${TICKET_MYSQL_USERNAME:-ticket_app}"
@@ -117,12 +118,6 @@ run_maven_package() {
     echo "打包完成：${JAR_PATH}"
 }
 
-check_already_running() {
-    if command -v pgrep >/dev/null 2>&1 && pgrep -f "java .*ticket-management.jar" >/dev/null 2>&1; then
-        fail "检测到 ${APP_NAME} 可能已经在运行。请先关闭现有程序窗口后再启动。"
-    fi
-}
-
 configure_mysql_credentials() {
     export TICKET_MYSQL_USERNAME="${MYSQL_APP_USER}"
     if [[ "${TICKET_MYSQL_USERNAME:l}" == "root" ]]; then
@@ -162,13 +157,13 @@ print_title
 
 echo "项目目录：${PROJECT_DIR}"
 echo "启动文件：${JAR_PATH}"
-echo "更新策略：每次启动自动打包最新代码"
+echo "窗口编号：${TICKET_INSTANCE_ID}（支持同时启动多个窗口）"
+echo "更新策略：源码变化时自动打包；其余窗口直接复用最新 JAR"
 echo
 
 [[ -d "${PROJECT_DIR}" ]] || fail "未找到项目目录，请确认启动器和 ticket-management 文件夹在同一目录。"
 check_command "java" "Java"
 build_if_needed
-check_already_running
 
 echo "检查 MySQL：${MYSQL_HOST}:${MYSQL_PORT}"
 if ! check_port "${MYSQL_HOST}" "${MYSQL_PORT}"; then

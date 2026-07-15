@@ -5,6 +5,7 @@ import com.ticket.ui.theme.AppTheme;
 import com.ticket.ui.theme.WindowIconUtil;
 import com.ticket.service.CrossDatabaseRepairService;
 import com.ticket.service.MongoLogRetryService;
+import com.ticket.service.TicketHistoryMigrationService;
 import com.ticket.util.MongoDBUtil;
 import com.ticket.util.MySQLDBUtil;
 import javax.swing.JOptionPane;
@@ -34,10 +35,23 @@ public class Main {
         }
 
         try {
+            int migrated = new TicketHistoryMigrationService().migrateExistingWorkflow();
+            if (migrated > 0) {
+                LOGGER.info("Migrated {} existing tickets into the MySQL history timeline", migrated);
+            }
+        } catch (Exception ex) {
+            LOGGER.error("Ticket history migration failed; execute mysql_ticket_history.sql before starting", ex);
+            JOptionPane.showMessageDialog(null,
+                "工单历史升级失败，请先执行 mysql_ticket_history.sql。原有数据没有被删除。",
+                "数据库升级未完成", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        try {
             new MongoLogRetryService().retryPending();
             new CrossDatabaseRepairService().retryPending();
         } catch (Exception ex) {
-            LOGGER.warn("Pending MongoDB writes could not be replayed; verify the incremental database script was executed", ex);
+            LOGGER.warn("Pending MongoDB writes could not be replayed", ex);
         }
 
         SwingUtilities.invokeLater(() -> {

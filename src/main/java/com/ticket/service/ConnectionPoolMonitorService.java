@@ -13,23 +13,23 @@ public class ConnectionPoolMonitorService {
     private final AuditLogService auditLogService = new AuditLogService();
 
     public ConnectionPoolStatusDTO currentStatus(User actor) {
-        UserService.requireAdmin(actor);
+        UserService.requireAdministrator(actor);
         return MySQLDBUtil.getPoolStatus();
     }
 
     public List<ConnectionPoolStatusDTO> currentStatuses(User actor) {
-        UserService.requireAdmin(actor);
+        UserService.requireAdministrator(actor);
         return MySQLDBUtil.getAllPoolStatuses();
     }
 
     public void recordPanelView(User actor) {
-        UserService.requireAdmin(actor);
+        UserService.requireAdministrator(actor);
         auditLogService.write(String.valueOf(actor.getUserId()), "ADMIN_OPERATION", "INFO",
             "查看连接池监控面板", "VIEW_CONNECTION_POOL");
     }
 
     public void simulateConnectionUsage(User actor, int requestedConnections, int holdSeconds) {
-        UserService.requireAdmin(actor);
+        UserService.requireAdministrator(actor);
         ConnectionPoolStatusDTO status = MySQLDBUtil.getPoolStatus();
         int safeCapacity = status.getMaximumPoolSize() - status.getActiveConnections() - 1;
         if (safeCapacity <= 0) {

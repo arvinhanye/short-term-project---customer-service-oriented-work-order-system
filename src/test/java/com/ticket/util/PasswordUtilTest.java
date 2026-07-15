@@ -14,6 +14,10 @@ class PasswordUtilTest {
             () -> PasswordUtil.validateStrength("AliceSafe#482", "alice"));
         Assertions.assertThrows(BusinessException.class,
             () -> PasswordUtil.validateStrength("Short#12"));
+        Assertions.assertThrows(BusinessException.class,
+            () -> PasswordUtil.validateStrength("River Stone#123"));
+        Assertions.assertThrows(BusinessException.class,
+            () -> PasswordUtil.validateStrength("River\tStone#123"));
     }
 
     @Test

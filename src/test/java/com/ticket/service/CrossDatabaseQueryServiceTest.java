@@ -49,14 +49,35 @@ class CrossDatabaseQueryServiceTest {
     }
 
     @Test
+    void shouldFilterPendingTransfersForTargetAdmin() {
+        CrossTicketDTO first = ticketAssignedTo("10001");
+        first.getItemDetail().getMetadata().setTransferTargetAdminId("10002");
+        CrossTicketDTO second = ticketAssignedTo(null);
+        second.getItemDetail().getMetadata().setTransferTargetAdminId("10003");
+        CrossTicketDTO mysqlOnly = new CrossTicketDTO();
+        Order mysqlWorkflow = new Order();
+        mysqlWorkflow.setTransferTargetAdminId(10002L);
+        mysqlOnly.setOrder(mysqlWorkflow);
+
+        var result = CrossDatabaseQueryService.filterAndPageByAssignment(
+            List.of(first, second, mysqlOnly), AssignmentScope.PENDING_TRANSFER_TO, "10002", 1, 50);
+
+        Assertions.assertEquals(2, result.getTotal());
+        Assertions.assertSame(first, result.getRecords().get(0));
+    }
+
+    @Test
     void shouldCountOnlyStatusesAssignedToCurrentAdmin() {
+        CrossTicketDTO awaitingConfirmation = ticketAssignedTo("10002", 1);
+        awaitingConfirmation.getItemDetail().getMetadata().setTransferTargetAdminId("10001");
         List<CrossTicketDTO> tickets = List.of(
             ticketAssignedTo("10001", 0),
             ticketAssignedTo("10001", 0),
             ticketAssignedTo("10001", 1),
             ticketAssignedTo("10001", 2),
             ticketAssignedTo("10002", 0),
-            ticketAssignedTo(null, 1)
+            ticketAssignedTo(null, 1),
+            awaitingConfirmation
         );
 
         var counts = CrossDatabaseQueryService.countStatusesByAssignment(tickets, "10001");
@@ -64,6 +85,23 @@ class CrossDatabaseQueryServiceTest {
         Assertions.assertEquals(2L, counts.get(0));
         Assertions.assertEquals(1L, counts.get(1));
         Assertions.assertEquals(1L, counts.get(2));
+        Assertions.assertEquals(1L, counts.get(CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION));
+    }
+
+    @Test
+    void shouldPutIncomingTransferAtFrontOfRiskList() {
+        CrossTicketDTO awaitingConfirmation = riskTicket(
+            2006L, "10002", 1, "LOW", LocalDateTime.of(2026, 7, 4, 9, 0));
+        awaitingConfirmation.getItemDetail().getMetadata().setTransferTargetAdminId("10001");
+
+        var overview = CrossDatabaseQueryService.buildAssignedWorkOverview(List.of(
+            riskTicket(2001L, "10001", 0, "URGENT", LocalDateTime.of(2026, 7, 1, 9, 0)),
+            awaitingConfirmation), "10001", 2);
+
+        Assertions.assertEquals(1L,
+            overview.statusCounts().get(CrossDatabaseQueryService.STATUS_PENDING_CONFIRMATION));
+        Assertions.assertEquals(List.of(2006L, 2001L), overview.riskTickets().stream()
+            .map(ticket -> ticket.getItem().getItemId()).toList());
     }
 
     @Test

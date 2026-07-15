@@ -85,6 +85,18 @@ class CategoryServiceTest {
         Assertions.assertNotNull(dao.findById(1L));
     }
 
+    @Test
+    void preventsDuplicateNamesUnderTheSameParent() {
+        FakeCategoryDAO dao = new FakeCategoryDAO();
+        dao.add(category(1L, "支付问题", null));
+        dao.add(category(2L, "退款申请", 1L));
+        CategoryService service = new CategoryService(dao, new NoopAuditLogService());
+
+        Assertions.assertThrows(BusinessException.class,
+            () -> service.createCategory(user("ADMIN"), " 退款申请 ", 1L));
+        Assertions.assertDoesNotThrow(() -> service.createCategory(user("ADMIN"), "退款申请", null));
+    }
+
     private User user(String role) {
         User user = new User();
         user.setUserId(1L);
@@ -130,5 +142,11 @@ class CategoryServiceTest {
             return (int) categories.values().stream().filter(c -> categoryId.equals(c.getParentId())).count();
         }
         @Override public int countItems(Long categoryId) { return itemCounts.getOrDefault(categoryId, 0); }
+        @Override public boolean existsSiblingName(Long excludedCategoryId, Long parentId, String name) {
+            return categories.values().stream().anyMatch(category ->
+                !category.getCategoryId().equals(excludedCategoryId)
+                    && java.util.Objects.equals(category.getParentId(), parentId)
+                    && category.getName().trim().equalsIgnoreCase(name.trim()));
+        }
     }
 }

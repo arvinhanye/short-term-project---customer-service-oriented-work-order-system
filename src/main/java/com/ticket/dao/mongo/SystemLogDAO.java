@@ -23,7 +23,11 @@ public class SystemLogDAO extends MongoBaseDAO {
             .append("log_level", log.getLogLevel())
             .append("message", log.getMessage())
             .append("action_detail", new Document("ip", actionDetail.getIp())
-                .append("operation", actionDetail.getOperation()))
+                .append("operation", actionDetail.getOperation())
+                .append("target_user_id", actionDetail.getTargetUserId())
+                .append("before_role", actionDetail.getBeforeRole())
+                .append("after_role", actionDetail.getAfterRole())
+                .append("reason", actionDetail.getReason()))
             .append("timestamp", Date.from(timestamp)));
     }
 

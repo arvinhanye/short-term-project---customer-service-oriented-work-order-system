@@ -26,7 +26,7 @@ class PasswordSecurityIntegrationTest {
 
         User user = new UserService().login("admin01", "CedarFalcon#481");
 
-        Assertions.assertEquals("ADMIN", user.getRole());
+        Assertions.assertEquals("ROOT", user.getRole());
         Assertions.assertEquals(1, user.getMustChangePassword());
         Assertions.assertEquals(0, user.getFailedLoginAttempts());
         Assertions.assertNull(user.getLockedUntil());

@@ -61,6 +61,10 @@ public class SystemLog {
     public static class ActionDetail {
         private String ip;
         private String operation;
+        private String targetUserId;
+        private String beforeRole;
+        private String afterRole;
+        private String reason;
 
         public String getIp() {
             return ip;
@@ -76,6 +80,38 @@ public class SystemLog {
 
         public void setOperation(String operation) {
             this.operation = operation;
+        }
+
+        public String getTargetUserId() {
+            return targetUserId;
+        }
+
+        public void setTargetUserId(String targetUserId) {
+            this.targetUserId = targetUserId;
+        }
+
+        public String getBeforeRole() {
+            return beforeRole;
+        }
+
+        public void setBeforeRole(String beforeRole) {
+            this.beforeRole = beforeRole;
+        }
+
+        public String getAfterRole() {
+            return afterRole;
+        }
+
+        public void setAfterRole(String afterRole) {
+            this.afterRole = afterRole;
+        }
+
+        public String getReason() {
+            return reason;
+        }
+
+        public void setReason(String reason) {
+            this.reason = reason;
         }
     }
 }

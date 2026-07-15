@@ -18,6 +18,7 @@ import com.ticket.model.Item;
 import com.ticket.model.ItemDetail;
 import com.ticket.model.Order;
 import com.ticket.model.User;
+import com.ticket.util.WorkflowMetadataUtil;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Map;
@@ -26,10 +27,14 @@ import java.util.stream.Collectors;
 import java.util.List;
 
 public class CrossDatabaseQueryService {
+    /** 转派待接收方确认时使用的展示状态；不覆盖工单原有生命周期状态。 */
+    public static final int STATUS_PENDING_CONFIRMATION = 5;
+
     public enum AssignmentScope {
         ALL,
         UNASSIGNED,
-        ASSIGNED_TO
+        ASSIGNED_TO,
+        PENDING_TRANSFER_TO
     }
 
     public record AssignedWorkOverview(Map<Integer, Long> statusCounts, List<CrossTicketDTO> riskTickets) {
@@ -46,6 +51,7 @@ public class CrossDatabaseQueryService {
     private final DetailDAO detailDAO = new DetailDAO();
     private final CommentDAO commentDAO = new CommentDAO();
     private final LogDAO logDAO = new LogDAO();
+    private final TicketHistoryService ticketHistoryService = new TicketHistoryService();
 
     public CrossTicketDTO getTicket(User actor, Long itemId) {
         UserService.requireActiveUser(actor);
@@ -55,36 +61,57 @@ public class CrossDatabaseQueryService {
         }
         Order order = orderDAO.findByItemId(itemId);
         requireTicketVisible(actor, order);
-        return buildTicket(item, order, UserService.isAdmin(actor));
+        CrossTicketDTO ticket = buildTicket(item, order, UserService.isTicketStaff(actor));
+        ticket.setHistories(ticketHistoryService.listForTicket(actor, itemId, 500));
+        return ticket;
     }
 
     public PageResult<CrossTicketDTO> pageTickets(User actor, Integer status, int page, int pageSize) {
         UserService.requireActiveUser(actor);
-        return pageTicketSummaries(actor, UserService.isAdmin(actor) ? null : actor.getUserId(), status, null, page, pageSize);
+        return pageTicketSummaries(actor, UserService.isTicketStaff(actor) ? null : actor.getUserId(), status, null, page, pageSize);
     }
 
     public PageResult<CrossTicketDTO> pageTickets(User actor, Integer status, String keyword, int page, int pageSize) {
         UserService.requireActiveUser(actor);
-        return pageTicketSummaries(actor, UserService.isAdmin(actor) ? null : actor.getUserId(), status, keyword, page, pageSize);
+        return pageTicketSummaries(actor, UserService.isTicketStaff(actor) ? null : actor.getUserId(), status, keyword, page, pageSize);
     }
 
     public PageResult<CrossTicketDTO> pageAdminTickets(User actor, Integer status, String keyword,
                                                         AssignmentScope assignmentScope, String assignedAdminId,
                                                         int page, int pageSize) {
-        UserService.requireAdmin(actor);
+        UserService.requireTicketStaff(actor);
         AssignmentScope normalizedScope = assignmentScope == null ? AssignmentScope.ALL : assignmentScope;
         if (normalizedScope == AssignmentScope.ALL) {
             return pageTicketSummaries(actor, null, status, keyword, page, pageSize);
         }
 
-        List<CrossTicketDTO> records = orderDAO.listTicketSummaries(null, status, keyword);
-        enrichSummaryDetails(records);
-        return filterAndPageByAssignment(records, normalizedScope, assignedAdminId, page, pageSize);
+        Long adminId = normalizedScope == AssignmentScope.UNASSIGNED ? null : parseAdminId(assignedAdminId);
+        PageResult<CrossTicketDTO> result = orderDAO.pageTicketSummariesByAssignment(
+            status, keyword, normalizedScope.name(), adminId, page, pageSize);
+        enrichSummaryDetails(result.getRecords());
+        return result;
     }
 
     public AssignedWorkOverview assignedWorkOverview(User actor, String assignedAdminId, int riskLimit) {
-        UserService.requireAdmin(actor);
-        List<CrossTicketDTO> records = orderDAO.listTicketSummaries(null, null, null);
+        UserService.requireTicketStaff(actor);
+        Long adminId = parseAdminId(assignedAdminId);
+        List<CrossTicketDTO> records = new ArrayList<>();
+        if (adminId != null) {
+            records.addAll(orderDAO.listTicketSummariesByAssignment(AssignmentScope.ASSIGNED_TO.name(), adminId));
+            Set<Long> loadedItemIds = records.stream()
+                .filter(java.util.Objects::nonNull)
+                .map(CrossTicketDTO::getItem)
+                .filter(java.util.Objects::nonNull)
+                .map(Item::getItemId)
+                .collect(Collectors.toSet());
+            for (CrossTicketDTO pending : orderDAO.listTicketSummariesByAssignment(
+                    AssignmentScope.PENDING_TRANSFER_TO.name(), adminId)) {
+                Long itemId = pending == null || pending.getItem() == null ? null : pending.getItem().getItemId();
+                if (itemId == null || loadedItemIds.add(itemId)) {
+                    records.add(pending);
+                }
+            }
+        }
         enrichSummaryDetails(records);
         return buildAssignedWorkOverview(records, assignedAdminId, riskLimit);
     }
@@ -113,7 +140,7 @@ public class CrossDatabaseQueryService {
 
     public UserActivityDTO getUserActivity(User actor, Long userId, int limit) {
         UserService.requireActiveUser(actor);
-        if (!UserService.isAdmin(actor) && !actor.getUserId().equals(userId)) {
+        if (!UserService.isTicketStaff(actor) && !actor.getUserId().equals(userId)) {
             throw new BusinessException("无权查看该用户活动");
         }
         User targetUser = userDAO.findById(userId);
@@ -124,14 +151,14 @@ public class CrossDatabaseQueryService {
         UserActivityDTO dto = new UserActivityDTO();
         dto.setUser(targetUser);
         dto.setProfile(profileDAO.findByUserId(userId));
-        dto.setRecentComments(commentDAO.findByUserId(String.valueOf(userId), normalizedLimit, UserService.isAdmin(actor)));
+        dto.setRecentComments(commentDAO.findByUserId(String.valueOf(userId), normalizedLimit, UserService.isTicketStaff(actor)));
         dto.setRecentActions(logDAO.findRecentByUser(String.valueOf(userId), normalizedLimit));
 
         List<CrossTicketDTO> tickets = new ArrayList<>();
         for (Order order : orderDAO.findRecentByUser(userId, normalizedLimit)) {
             Item item = itemDAO.findById(order.getItemId());
             if (item != null) {
-                tickets.add(buildTicket(item, order, UserService.isAdmin(actor)));
+                tickets.add(buildTicket(item, order, UserService.isTicketStaff(actor)));
             }
         }
         dto.setRecentTickets(tickets);
@@ -140,7 +167,7 @@ public class CrossDatabaseQueryService {
 
     public PageResult<CrossTicketDTO> searchTickets(User actor, String keyword, int page, int pageSize) {
         UserService.requireActiveUser(actor);
-        return pageTicketSummaries(actor, UserService.isAdmin(actor) ? null : actor.getUserId(), null, keyword, page, pageSize);
+        return pageTicketSummaries(actor, UserService.isTicketStaff(actor) ? null : actor.getUserId(), null, keyword, page, pageSize);
     }
 
     private PageResult<CrossTicketDTO> pageTicketSummaries(User actor, Long userId, Integer status, String keyword, int page, int pageSize) {
@@ -155,6 +182,7 @@ public class CrossDatabaseQueryService {
         Map<String, com.ticket.model.ItemDetail> details = detailDAO.findByItemIds(itemIds);
         for (CrossTicketDTO ticket : records) {
             ticket.setItemDetail(details.get(String.valueOf(ticket.getItem().getItemId())));
+            WorkflowMetadataUtil.apply(ticket.getOrder(), ticket.getItemDetail());
         }
     }
 
@@ -180,6 +208,10 @@ public class CrossDatabaseQueryService {
             return counts;
         }
         for (CrossTicketDTO ticket : records) {
+            if (matchesAssignment(ticket, AssignmentScope.PENDING_TRANSFER_TO, assignedAdminId)) {
+                counts.merge(STATUS_PENDING_CONFIRMATION, 1L, Long::sum);
+                continue;
+            }
             if (!matchesAssignment(ticket, AssignmentScope.ASSIGNED_TO, assignedAdminId)
                     || ticket.getOrder() == null || ticket.getOrder().getStatus() == null) {
                 continue;
@@ -197,11 +229,15 @@ public class CrossDatabaseQueryService {
         }
         int normalizedLimit = Math.max(1, Math.min(riskLimit, 20));
         List<CrossTicketDTO> risks = records.stream()
-            .filter(ticket -> matchesAssignment(ticket, AssignmentScope.ASSIGNED_TO, assignedAdminId))
-            .filter(ticket -> ticket.getOrder() != null
-                && (Integer.valueOf(0).equals(ticket.getOrder().getStatus())
-                    || Integer.valueOf(1).equals(ticket.getOrder().getStatus())))
-            .sorted(Comparator.comparingInt(CrossDatabaseQueryService::priorityRank)
+            .filter(ticket -> matchesAssignment(ticket, AssignmentScope.PENDING_TRANSFER_TO, assignedAdminId)
+                || (matchesAssignment(ticket, AssignmentScope.ASSIGNED_TO, assignedAdminId)
+                    && ticket.getOrder() != null
+                    && (Integer.valueOf(0).equals(ticket.getOrder().getStatus())
+                        || Integer.valueOf(1).equals(ticket.getOrder().getStatus()))))
+            .sorted(Comparator.comparingInt(
+                    (CrossTicketDTO ticket) -> matchesAssignment(
+                        ticket, AssignmentScope.PENDING_TRANSFER_TO, assignedAdminId) ? 0 : 1)
+                .thenComparingInt(CrossDatabaseQueryService::priorityRank)
                 .thenComparing(CrossDatabaseQueryService::createdAt,
                     Comparator.nullsLast(Comparator.naturalOrder())))
             .limit(normalizedLimit)
@@ -253,11 +289,19 @@ public class CrossDatabaseQueryService {
                                              String assignedAdminId) {
         ItemDetail detail = ticket == null ? null : ticket.getItemDetail();
         ItemDetail.Metadata metadata = detail == null ? null : detail.getMetadata();
-        String actualAdminId = metadata == null ? null : metadata.getAssignedAdminId();
+        Order order = ticket == null ? null : ticket.getOrder();
+        String actualAdminId = order != null && order.getAssignedAdminId() != null
+            ? String.valueOf(order.getAssignedAdminId())
+            : metadata == null ? null : metadata.getAssignedAdminId();
+        String transferTargetAdminId = order != null && order.getTransferTargetAdminId() != null
+            ? String.valueOf(order.getTransferTargetAdminId())
+            : metadata == null ? null : metadata.getTransferTargetAdminId();
         return switch (assignmentScope) {
             case ALL -> true;
             case UNASSIGNED -> actualAdminId == null || actualAdminId.isBlank();
             case ASSIGNED_TO -> assignedAdminId != null && assignedAdminId.equals(actualAdminId);
+            case PENDING_TRANSFER_TO -> assignedAdminId != null
+                && assignedAdminId.equals(transferTargetAdminId);
         };
     }
 
@@ -267,6 +311,7 @@ public class CrossDatabaseQueryService {
         dto.setOrder(order);
         dto.setCategory(categoryDAO.findById(item.getCategoryId()));
         dto.setItemDetail(detailDAO.findByItemId(String.valueOf(item.getItemId())));
+        WorkflowMetadataUtil.apply(order, dto.getItemDetail());
         dto.setActionLogs(logDAO.findByItemId(String.valueOf(item.getItemId()), 50));
         dto.setActionCount(dto.getActionLogs().size());
 
@@ -295,12 +340,12 @@ public class CrossDatabaseQueryService {
 
     private void requireTicketVisible(User actor, Order order) {
         if (order == null) {
-            if (!UserService.isAdmin(actor)) {
+            if (!UserService.isTicketStaff(actor)) {
                 throw new BusinessException("无权查看该工单");
             }
             return;
         }
-        if (!UserService.isAdmin(actor) && !actor.getUserId().equals(order.getUserId())) {
+        if (!UserService.isTicketStaff(actor) && !actor.getUserId().equals(order.getUserId())) {
             throw new BusinessException("无权查看该工单");
         }
     }
@@ -324,5 +369,14 @@ public class CrossDatabaseQueryService {
 
     private int normalizeLimit(int limit) {
         return Math.max(1, Math.min(limit, 50));
+    }
+
+    private Long parseAdminId(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return Long.valueOf(value.trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 }

@@ -12,7 +12,7 @@ UPDATE users
 SET password_hash = CASE username
         WHEN 'admin01' THEN '$2a$12$OzJdGwxR6JOPJnEfhJHeOOf49viWN2SY26HIi04oo.SlDoujbeObq'
         WHEN 'admin02' THEN '$2a$12$Xj3FjyJfDPPbur5BJd2icey4bxSD7jR86nc.fNibClFq/bLtfghQa'
-        WHEN 'admin03' THEN '$2a$12$bp0Fghd7zsc/TdOoaDm6bO5AkaqEGd8piZTM9uesnoKugtaVi53Tm'
+        WHEN 'admin03' THEN '$2a$12$5gfJ8hwvjakmDO5xti7VWu.hwlr2Zkbu45y745ZjYaOqIV6/906be'
         WHEN 'user01' THEN '$2a$12$XUOV3QxRm5lcVXsCAA9A3euDlAoZg/BRWJLDMLoeoZKZYxqBSG5pa'
         WHEN 'user02' THEN '$2a$12$ymlkux1AKQIsKIFkJF7F2eE2fNE.rFz3FyUhLTVdxuOcLSyLUEoYG'
         WHEN 'user03' THEN '$2a$12$YksUENCIP.kkFx8K7t6qZOfEASug39pXpeGTLYkvaf0XZqP7PtZa2'
@@ -20,7 +20,7 @@ SET password_hash = CASE username
         WHEN 'user05' THEN '$2a$12$/bI4dBSunVTD5DUkKQaT0u7AQJ4WThpE9bJ/pc9Cn6v2O/boJZEDO'
         WHEN 'user06' THEN '$2a$12$4MU4fb8K7pyAxHKl4qjije2hRDx0xCo/KwbuDx2zfMMogUmUpi5JW'
         WHEN 'user07' THEN '$2a$12$Q2WK1dK81z5DbVUxgg.j.uwQvVEL6.ZGcdpil8KMrWIr9Gv5MtTEW'
-        WHEN 'admin04' THEN '$2a$12$XUOdfrcTzfzXyvO0BnjOiu1A4iwMjIiRtutfhfbPTW63V2Dlq.Jg2'
+        WHEN 'admin04' THEN '$2a$12$mJyIQmvojc5K4Smhs3H6z.XgwH6Q3IMdql9UKCHED8kv5cGg15RlG'
         WHEN 'admin05' THEN '$2a$12$xmWTZDHkgzRZCt.dWfNpbOOWYnMmLunXo46UFSVzokIPG80ltdDnK'
     END,
     must_change_password = 1,

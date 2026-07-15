@@ -12,6 +12,7 @@ set "MYSQL_HOST=127.0.0.1"
 set "MYSQL_PORT=3306"
 set "MONGO_HOST=127.0.0.1"
 set "MONGO_PORT=27017"
+if "%TICKET_INSTANCE_ID%"=="" set "TICKET_INSTANCE_ID=%RANDOM%-%RANDOM%"
 
 echo ========================================
 echo   %APP_NAME%启动器（%APP_VERSION%）
@@ -23,6 +24,7 @@ echo   + 操作审计日志：MongoDB + logs/audit.log
 echo.
 echo 项目目录：%PROJECT_DIR%
 echo 启动文件：%JAR_PATH%
+echo 窗口编号：%TICKET_INSTANCE_ID%（支持同时启动多个窗口）
 echo 更新策略：每次启动自动打包最新代码
 echo.
 

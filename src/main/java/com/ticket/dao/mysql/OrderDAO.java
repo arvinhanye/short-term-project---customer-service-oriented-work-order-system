@@ -13,6 +13,9 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.sql.Timestamp;
+import java.sql.Types;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import javax.sql.DataSource;
 
@@ -26,13 +29,16 @@ public class OrderDAO extends BaseDAO {
     }
 
     public long insert(Connection connection, Order order) throws Exception {
-        String sql = "INSERT INTO orders (user_id, item_id, amount, status, created_at) VALUES (?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO orders (user_id, item_id, amount, status, reminder_count, workflow_version, created_at) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             statement.setLong(1, order.getUserId());
             statement.setLong(2, order.getItemId());
             statement.setBigDecimal(3, order.getAmount());
             statement.setInt(4, order.getStatus());
-            statement.setTimestamp(5, Timestamp.valueOf(order.getCreatedAt()));
+            statement.setInt(5, order.getReminderCount());
+            statement.setLong(6, order.getWorkflowVersion());
+            statement.setTimestamp(7, Timestamp.valueOf(order.getCreatedAt()));
             statement.executeUpdate();
             try (var keys = statement.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -45,6 +51,21 @@ public class OrderDAO extends BaseDAO {
 
     public Order findByItemId(Long itemId) {
         return queryOne("SELECT * FROM orders WHERE item_id = ?", statement -> statement.setLong(1, itemId), this::mapOrder);
+    }
+
+    public List<Long> findUnmigratedItemIds(int limit) {
+        List<Long> itemIds = new ArrayList<>();
+        try (Connection connection = getWriteConnection();
+             PreparedStatement statement = connection.prepareStatement(
+                 "SELECT item_id FROM orders WHERE workflow_version = 0 ORDER BY item_id LIMIT ?")) {
+            statement.setInt(1, Math.max(1, Math.min(limit, 1000)));
+            try (var resultSet = statement.executeQuery()) {
+                while (resultSet.next()) itemIds.add(resultSet.getLong("item_id"));
+            }
+            return itemIds;
+        } catch (Exception ex) {
+            throw new DBException("Failed to query unmigrated workflows from write database", ex);
+        }
     }
 
     public List<Order> findRecentByUser(Long userId, int limit) {
@@ -152,18 +173,19 @@ public class OrderDAO extends BaseDAO {
         int normalizedPageSize = normalizeLimit(pageSize);
         String normalizedKeyword = keyword == null ? "" : keyword.trim();
         boolean byUser = userId != null;
-        boolean byStatus = status != null;
+        boolean byPendingConfirmation = Integer.valueOf(5).equals(status);
+        boolean byStatus = status != null && !byPendingConfirmation;
         boolean byKeyword = !normalizedKeyword.isBlank();
         String where = " WHERE 1 = 1" + (byUser ? " AND o.user_id = ?" : "")
-            + (byStatus ? " AND o.status = ?" : "") + (byKeyword ? " AND i.title LIKE ?" : "");
+            + (byStatus ? " AND o.status = ?" : "")
+            + (byPendingConfirmation ? " AND o.transfer_request_id IS NOT NULL" : "")
+            + (byKeyword ? " AND i.title LIKE ?" : "");
         String from = " FROM orders o JOIN items i ON o.item_id = i.item_id JOIN categories c ON i.category_id = c.category_id "
             + "JOIN users u ON o.user_id = u.user_id";
         long total = queryOne("SELECT COUNT(*) AS cnt" + from + where,
             statement -> bindSummaryFilter(statement, userId, status, normalizedKeyword, byUser, byStatus, byKeyword),
             rs -> rs.getLong("cnt"));
-        List<CrossTicketDTO> records = query("SELECT o.order_id, o.user_id, o.item_id, o.amount, o.status AS order_status, "
-                + "o.created_at AS order_created_at, i.title, i.category_id, i.status AS item_status, "
-                + "i.created_at AS item_created_at, i.updated_at AS item_updated_at, c.name AS category_name, u.username"
+        List<CrossTicketDTO> records = query("SELECT " + summaryColumns()
                 + from + where + " ORDER BY o.created_at DESC, o.order_id DESC LIMIT ? OFFSET ?",
             statement -> {
                 int index = bindSummaryFilter(statement, userId, status, normalizedKeyword, byUser, byStatus, byKeyword);
@@ -171,6 +193,50 @@ public class OrderDAO extends BaseDAO {
                 statement.setInt(index, offset(normalizedPage, normalizedPageSize));
             }, this::mapTicketSummary);
         return new PageResult<>(records, total, normalizedPage, normalizedPageSize);
+    }
+
+    /** 负责人筛选直接下推到 MySQL，避免先加载全量 MongoDB 详情再在内存分页。 */
+    public PageResult<CrossTicketDTO> pageTicketSummariesByAssignment(Integer status, String keyword,
+                                                                       String assignmentScope, Long adminId,
+                                                                       int page, int pageSize) {
+        int normalizedPage = normalizePage(page);
+        int normalizedPageSize = normalizeLimit(pageSize);
+        String normalizedKeyword = keyword == null ? "" : keyword.trim();
+        boolean byPendingConfirmation = Integer.valueOf(5).equals(status);
+        boolean byStatus = status != null && !byPendingConfirmation;
+        boolean byKeyword = !normalizedKeyword.isBlank();
+        String assignmentClause = assignmentClause(assignmentScope);
+        boolean needsAdmin = !"UNASSIGNED".equals(assignmentScope);
+        if (needsAdmin && adminId == null) {
+            return new PageResult<>(List.of(), 0, normalizedPage, normalizedPageSize);
+        }
+        String where = " WHERE 1 = 1" + (byStatus ? " AND o.status = ?" : "")
+            + (byPendingConfirmation ? " AND o.transfer_request_id IS NOT NULL" : "")
+            + (byKeyword ? " AND i.title LIKE ?" : "") + assignmentClause;
+        String from = summaryFrom();
+        long total = queryOne("SELECT COUNT(*) AS cnt" + from + where,
+            statement -> bindAssignmentFilter(statement, status, normalizedKeyword, byStatus, byKeyword,
+                needsAdmin, adminId), rs -> rs.getLong("cnt"));
+        List<CrossTicketDTO> records = query("SELECT " + summaryColumns() + from + where
+                + " ORDER BY o.created_at DESC, o.order_id DESC LIMIT ? OFFSET ?",
+            statement -> {
+                int index = bindAssignmentFilter(statement, status, normalizedKeyword, byStatus, byKeyword,
+                    needsAdmin, adminId);
+                statement.setInt(index++, normalizedPageSize);
+                statement.setInt(index, offset(normalizedPage, normalizedPageSize));
+            }, this::mapTicketSummary);
+        return new PageResult<>(records, total, normalizedPage, normalizedPageSize);
+    }
+
+    public List<CrossTicketDTO> listTicketSummariesByAssignment(String assignmentScope, Long adminId) {
+        String assignmentClause = assignmentClause(assignmentScope);
+        boolean needsAdmin = !"UNASSIGNED".equals(assignmentScope);
+        if (needsAdmin && adminId == null) return List.of();
+        return query("SELECT " + summaryColumns() + summaryFrom() + " WHERE 1 = 1" + assignmentClause
+                + " ORDER BY o.created_at DESC, o.order_id DESC",
+            statement -> {
+                if (needsAdmin) statement.setLong(1, adminId);
+            }, this::mapTicketSummary);
     }
 
     /**
@@ -185,9 +251,7 @@ public class OrderDAO extends BaseDAO {
             + (byStatus ? " AND o.status = ?" : "") + (byKeyword ? " AND i.title LIKE ?" : "");
         String from = " FROM orders o JOIN items i ON o.item_id = i.item_id JOIN categories c ON i.category_id = c.category_id "
             + "JOIN users u ON o.user_id = u.user_id";
-        return query("SELECT o.order_id, o.user_id, o.item_id, o.amount, o.status AS order_status, "
-                + "o.created_at AS order_created_at, i.title, i.category_id, i.status AS item_status, "
-                + "i.created_at AS item_created_at, i.updated_at AS item_updated_at, c.name AS category_name, u.username"
+        return query("SELECT " + summaryColumns()
                 + from + where + " ORDER BY o.created_at DESC, o.order_id DESC",
             statement -> bindSummaryFilter(statement, userId, status, normalizedKeyword, byUser, byStatus, byKeyword),
             this::mapTicketSummary);
@@ -211,9 +275,7 @@ public class OrderDAO extends BaseDAO {
         long total = queryOne("SELECT COUNT(*) AS cnt" + from + countWhere,
             statement -> bindSummaryFilter(statement, userId, status, normalizedKeyword, byUser, byStatus, byKeyword),
             rs -> rs.getLong("cnt"));
-        List<CrossTicketDTO> records = query("SELECT o.order_id, o.user_id, o.item_id, o.amount, o.status AS order_status, "
-                + "o.created_at AS order_created_at, i.title, i.category_id, i.status AS item_status, "
-                + "i.created_at AS item_created_at, i.updated_at AS item_updated_at, c.name AS category_name, u.username"
+        List<CrossTicketDTO> records = query("SELECT " + summaryColumns()
                 + from + where + " ORDER BY o.created_at DESC, o.order_id DESC LIMIT ?",
             statement -> {
                 int index = bindSummaryFilter(statement, userId, status, normalizedKeyword, byUser, byStatus, byKeyword);
@@ -234,11 +296,176 @@ public class OrderDAO extends BaseDAO {
             hasNext && last != null ? last.getOrder().getOrderId() : null);
     }
 
-    public void updateStatus(Connection connection, Long orderId, int status) throws Exception {
-        try (PreparedStatement statement = connection.prepareStatement("UPDATE orders SET status = ? WHERE order_id = ?")) {
+    public Order findByItemIdForUpdate(Connection connection, Long itemId) throws Exception {
+        return findOne(connection, "SELECT * FROM orders WHERE item_id = ? FOR UPDATE", itemId);
+    }
+
+    public Order findByIdForUpdate(Connection connection, Long orderId) throws Exception {
+        return findOne(connection, "SELECT * FROM orders WHERE order_id = ? FOR UPDATE", orderId);
+    }
+
+    /** 工单状态、负责人和工作流版本一起作为乐观锁。 */
+    public int updateStatusIfCurrent(Connection connection, Order current, Long actorAdminId, int newStatus)
+            throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE orders SET status = ?, workflow_version = workflow_version + 1 "
+                    + "WHERE order_id = ? AND status = ? AND workflow_version = ? "
+                    + "AND assigned_admin_id = ? AND transfer_request_id IS NULL")) {
+            statement.setInt(1, newStatus);
+            statement.setLong(2, current.getOrderId());
+            statement.setInt(3, current.getStatus());
+            statement.setLong(4, current.getWorkflowVersion());
+            statement.setLong(5, actorAdminId);
+            return statement.executeUpdate();
+        }
+    }
+
+    public int claimIfUnassigned(Connection connection, Order current, Long adminId) throws Exception {
+        String sql = "UPDATE orders SET assigned_admin_id = ?, workflow_version = workflow_version + 1 "
+            + "WHERE item_id = ? AND status IN (0, 1) AND assigned_admin_id IS NULL "
+            + "AND transfer_request_id IS NULL AND workflow_version = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, adminId);
+            statement.setLong(2, current.getItemId());
+            statement.setLong(3, current.getWorkflowVersion());
+            return statement.executeUpdate();
+        }
+    }
+
+    public int requestTransfer(Connection connection, Order current, Long requesterId, Long targetId,
+                               String requestId, String reason, LocalDateTime requestedAt) throws Exception {
+        String assignmentCondition = current.getAssignedAdminId() == null
+            ? "assigned_admin_id IS NULL" : "assigned_admin_id = ?";
+        String sql = "UPDATE orders SET transfer_request_id = ?, transfer_requested_by = ?, "
+            + "transfer_target_admin_id = ?, transfer_reason = ?, transfer_requested_at = ?, "
+            + "workflow_version = workflow_version + 1 WHERE item_id = ? AND status IN (0, 1) AND "
+            + assignmentCondition + " AND transfer_request_id IS NULL AND workflow_version = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            int index = 1;
+            statement.setString(index++, requestId);
+            statement.setLong(index++, requesterId);
+            statement.setLong(index++, targetId);
+            statement.setString(index++, reason);
+            statement.setTimestamp(index++, Timestamp.valueOf(requestedAt));
+            statement.setLong(index++, current.getItemId());
+            if (current.getAssignedAdminId() != null) {
+                statement.setLong(index++, current.getAssignedAdminId());
+            }
+            statement.setLong(index, current.getWorkflowVersion());
+            return statement.executeUpdate();
+        }
+    }
+
+    public int respondToTransfer(Connection connection, Order current, Long targetId, String requestId,
+                                 boolean accept) throws Exception {
+        String assignmentUpdate = accept ? "assigned_admin_id = ?, " : "";
+        String sql = "UPDATE orders SET " + assignmentUpdate
+            + "transfer_request_id = NULL, transfer_requested_by = NULL, transfer_target_admin_id = NULL, "
+            + "transfer_reason = NULL, transfer_requested_at = NULL, workflow_version = workflow_version + 1 "
+            + "WHERE item_id = ? AND transfer_request_id = ? AND transfer_target_admin_id = ? "
+            + "AND workflow_version = ?" + (accept ? " AND status IN (0, 1)" : "");
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            int index = 1;
+            if (accept) statement.setLong(index++, targetId);
+            statement.setLong(index++, current.getItemId());
+            statement.setString(index++, requestId);
+            statement.setLong(index++, targetId);
+            statement.setLong(index, current.getWorkflowVersion());
+            return statement.executeUpdate();
+        }
+    }
+
+    public int cancelTransfer(Connection connection, Order current, Long requesterId, String requestId)
+            throws Exception {
+        String sql = "UPDATE orders SET transfer_request_id = NULL, transfer_requested_by = NULL, "
+            + "transfer_target_admin_id = NULL, transfer_reason = NULL, transfer_requested_at = NULL, "
+            + "workflow_version = workflow_version + 1 WHERE item_id = ? AND transfer_request_id = ? "
+            + "AND transfer_requested_by = ? AND workflow_version = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, current.getItemId());
+            statement.setString(2, requestId);
+            statement.setLong(3, requesterId);
+            statement.setLong(4, current.getWorkflowVersion());
+            return statement.executeUpdate();
+        }
+    }
+
+    public int recordReminder(Connection connection, Order current, Long userId,
+                              LocalDateTime cooldownCutoff, LocalDateTime remindedAt) throws Exception {
+        String sql = "UPDATE orders SET reminder_count = reminder_count + 1, last_reminded_at = ?, "
+            + "workflow_version = workflow_version + 1 WHERE item_id = ? AND user_id = ? "
+            + "AND status IN (0, 1) AND workflow_version = ? "
+            + "AND (last_reminded_at IS NULL OR last_reminded_at <= ?)";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setTimestamp(1, Timestamp.valueOf(remindedAt));
+            statement.setLong(2, current.getItemId());
+            statement.setLong(3, userId);
+            statement.setLong(4, current.getWorkflowVersion());
+            statement.setTimestamp(5, Timestamp.valueOf(cooldownCutoff));
+            return statement.executeUpdate();
+        }
+    }
+
+    public int incrementWorkflowVersion(Connection connection, Order current) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE orders SET workflow_version = workflow_version + 1 WHERE item_id = ? AND workflow_version = ?")) {
+            statement.setLong(1, current.getItemId());
+            statement.setLong(2, current.getWorkflowVersion());
+            return statement.executeUpdate();
+        }
+    }
+
+    public int migrateWorkflowSnapshot(Connection connection, Order current, Long assignedAdminId,
+                                       String transferRequestId, Long transferRequestedBy,
+                                       Long transferTargetAdminId, String transferReason,
+                                       LocalDateTime transferRequestedAt, int reminderCount,
+                                       LocalDateTime lastRemindedAt) throws Exception {
+        String sql = "UPDATE orders SET assigned_admin_id = ?, transfer_request_id = ?, "
+            + "transfer_requested_by = ?, transfer_target_admin_id = ?, transfer_reason = ?, "
+            + "transfer_requested_at = ?, reminder_count = ?, last_reminded_at = ?, workflow_version = 1 "
+            + "WHERE item_id = ? AND workflow_version = 0";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableLong(statement, 1, assignedAdminId);
+            statement.setString(2, transferRequestId);
+            setNullableLong(statement, 3, transferRequestedBy);
+            setNullableLong(statement, 4, transferTargetAdminId);
+            statement.setString(5, transferReason);
+            setNullableTimestamp(statement, 6, transferRequestedAt);
+            statement.setInt(7, Math.max(0, reminderCount));
+            setNullableTimestamp(statement, 8, lastRemindedAt);
+            statement.setLong(9, current.getItemId());
+            return statement.executeUpdate();
+        }
+    }
+
+    public List<Order> findForBatchUpdate(Connection connection, int status, LocalDateTime beforeTime,
+                                          Long assignedAdminId)
+            throws Exception {
+        List<Order> orders = new ArrayList<>();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM orders WHERE status = ? AND created_at <= ? AND assigned_admin_id = ? "
+                    + "AND transfer_request_id IS NULL ORDER BY order_id FOR UPDATE")) {
             statement.setInt(1, status);
-            statement.setLong(2, orderId);
-            statement.executeUpdate();
+            statement.setTimestamp(2, Timestamp.valueOf(beforeTime));
+            statement.setLong(3, assignedAdminId);
+            try (var resultSet = statement.executeQuery()) {
+                while (resultSet.next()) orders.add(mapOrder(resultSet));
+            }
+        }
+        return orders;
+    }
+
+    /** 系统批处理专用：逐张更新并清除已失效的待确认转派，调用方必须同时追加历史。 */
+    public int updateStatusForMaintenance(Connection connection, Order current, int newStatus) throws Exception {
+        String sql = "UPDATE orders SET status = ?, transfer_request_id = NULL, transfer_requested_by = NULL, "
+            + "transfer_target_admin_id = NULL, transfer_reason = NULL, transfer_requested_at = NULL, "
+            + "workflow_version = workflow_version + 1 WHERE order_id = ? AND status = ? AND workflow_version = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, newStatus);
+            statement.setLong(2, current.getOrderId());
+            statement.setInt(3, current.getStatus());
+            statement.setLong(4, current.getWorkflowVersion());
+            return statement.executeUpdate();
         }
     }
 
@@ -286,6 +513,30 @@ public class OrderDAO extends BaseDAO {
         return index;
     }
 
+    private int bindAssignmentFilter(PreparedStatement statement, Integer status, String keyword,
+                                     boolean byStatus, boolean byKeyword, boolean needsAdmin, Long adminId)
+            throws java.sql.SQLException {
+        int index = 1;
+        if (byStatus) statement.setInt(index++, status);
+        if (byKeyword) statement.setString(index++, "%" + keyword + "%");
+        if (needsAdmin) statement.setLong(index++, adminId);
+        return index;
+    }
+
+    private String assignmentClause(String assignmentScope) {
+        return switch (assignmentScope == null ? "" : assignmentScope) {
+            case "UNASSIGNED" -> " AND o.assigned_admin_id IS NULL";
+            case "ASSIGNED_TO" -> " AND o.assigned_admin_id = ?";
+            case "PENDING_TRANSFER_TO" -> " AND o.transfer_target_admin_id = ?";
+            default -> throw new IllegalArgumentException("Unsupported assignment scope: " + assignmentScope);
+        };
+    }
+
+    private String summaryFrom() {
+        return " FROM orders o JOIN items i ON o.item_id = i.item_id JOIN categories c ON i.category_id = c.category_id "
+            + "JOIN users u ON o.user_id = u.user_id";
+    }
+
     private CrossTicketDTO mapTicketSummary(java.sql.ResultSet resultSet) throws java.sql.SQLException {
         Item item = new Item();
         item.setItemId(resultSet.getLong("item_id"));
@@ -300,6 +551,7 @@ public class OrderDAO extends BaseDAO {
         order.setItemId(item.getItemId());
         order.setAmount(resultSet.getBigDecimal("amount"));
         order.setStatus(resultSet.getInt("order_status"));
+        mapWorkflow(resultSet, order, "");
         order.setCreatedAt(resultSet.getTimestamp("order_created_at").toLocalDateTime());
         Category category = new Category();
         category.setCategoryId(item.getCategoryId());
@@ -322,7 +574,54 @@ public class OrderDAO extends BaseDAO {
         order.setItemId(resultSet.getLong("item_id"));
         order.setAmount(resultSet.getBigDecimal("amount"));
         order.setStatus(resultSet.getInt("status"));
+        mapWorkflow(resultSet, order, "");
         order.setCreatedAt(resultSet.getTimestamp("created_at").toLocalDateTime());
         return order;
+    }
+
+    private String summaryColumns() {
+        return "o.order_id, o.user_id, o.item_id, o.amount, o.status AS order_status, "
+            + "o.assigned_admin_id, o.transfer_request_id, o.transfer_requested_by, "
+            + "o.transfer_target_admin_id, o.transfer_reason, o.transfer_requested_at, "
+            + "o.reminder_count, o.last_reminded_at, o.workflow_version, "
+            + "o.created_at AS order_created_at, i.title, i.category_id, i.status AS item_status, "
+            + "i.created_at AS item_created_at, i.updated_at AS item_updated_at, c.name AS category_name, u.username";
+    }
+
+    private void mapWorkflow(java.sql.ResultSet resultSet, Order order, String prefix) throws java.sql.SQLException {
+        order.setAssignedAdminId(nullableLong(resultSet, prefix + "assigned_admin_id"));
+        order.setTransferRequestId(resultSet.getString(prefix + "transfer_request_id"));
+        order.setTransferRequestedBy(nullableLong(resultSet, prefix + "transfer_requested_by"));
+        order.setTransferTargetAdminId(nullableLong(resultSet, prefix + "transfer_target_admin_id"));
+        order.setTransferReason(resultSet.getString(prefix + "transfer_reason"));
+        Timestamp transferAt = resultSet.getTimestamp(prefix + "transfer_requested_at");
+        order.setTransferRequestedAt(transferAt == null ? null : transferAt.toLocalDateTime());
+        order.setReminderCount(resultSet.getInt(prefix + "reminder_count"));
+        Timestamp remindedAt = resultSet.getTimestamp(prefix + "last_reminded_at");
+        order.setLastRemindedAt(remindedAt == null ? null : remindedAt.toLocalDateTime());
+        order.setWorkflowVersion(resultSet.getLong(prefix + "workflow_version"));
+    }
+
+    private Long nullableLong(java.sql.ResultSet resultSet, String column) throws java.sql.SQLException {
+        long value = resultSet.getLong(column);
+        return resultSet.wasNull() ? null : value;
+    }
+
+    private void setNullableLong(PreparedStatement statement, int index, Long value) throws java.sql.SQLException {
+        if (value == null) statement.setNull(index, Types.BIGINT); else statement.setLong(index, value);
+    }
+
+    private void setNullableTimestamp(PreparedStatement statement, int index, LocalDateTime value)
+            throws java.sql.SQLException {
+        if (value == null) statement.setNull(index, Types.TIMESTAMP); else statement.setTimestamp(index, Timestamp.valueOf(value));
+    }
+
+    private Order findOne(Connection connection, String sql, Long id) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, id);
+            try (var resultSet = statement.executeQuery()) {
+                return resultSet.next() ? mapOrder(resultSet) : null;
+            }
+        }
     }
 }

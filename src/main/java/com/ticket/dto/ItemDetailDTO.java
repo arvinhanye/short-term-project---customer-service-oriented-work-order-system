@@ -6,6 +6,7 @@ import com.ticket.model.ItemDetail;
 import com.ticket.model.Order;
 import com.ticket.model.Profile;
 import com.ticket.model.User;
+import com.ticket.model.TicketHistory;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -16,6 +17,7 @@ public class ItemDetailDTO {
     private Profile profile;
     private ItemDetail itemDetail;
     private List<Comment> comments = new ArrayList<>();
+    private List<TicketHistory> histories = new ArrayList<>();
 
     public Item getItem() {
         return item;
@@ -63,5 +65,13 @@ public class ItemDetailDTO {
 
     public void setComments(List<Comment> comments) {
         this.comments = comments;
+    }
+
+    public List<TicketHistory> getHistories() {
+        return histories;
+    }
+
+    public void setHistories(List<TicketHistory> histories) {
+        this.histories = histories;
     }
 }

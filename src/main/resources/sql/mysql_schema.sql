@@ -12,6 +12,7 @@ DROP VIEW IF EXISTS v_user_detail;
 DROP TABLE IF EXISTS system_log_import_records;
 DROP TABLE IF EXISTS cross_db_repair_records;
 DROP TABLE IF EXISTS pending_mongo_writes;
+DROP TABLE IF EXISTS ticket_history;
 DROP TABLE IF EXISTS orders;
 DROP TABLE IF EXISTS items;
 DROP TABLE IF EXISTS profiles;
@@ -26,7 +27,7 @@ CREATE TABLE users (
     password_hash VARCHAR(255) NOT NULL,
     email VARCHAR(100) NOT NULL UNIQUE,
     phone VARCHAR(20),
-    role ENUM('ADMIN', 'USER') NOT NULL,
+    role ENUM('ROOT', 'ADMIN', 'USER') NOT NULL,
     status TINYINT NOT NULL DEFAULT 1,
     failed_login_attempts INT NOT NULL DEFAULT 0,
     locked_until DATETIME NULL,
@@ -38,6 +39,7 @@ CREATE TABLE users (
     INDEX idx_users_email (email),
     INDEX idx_users_role (role),
     INDEX idx_users_status (status),
+    INDEX idx_users_role_status (role, status),
     INDEX idx_users_locked_until (locked_until)
 );
 
@@ -72,18 +74,66 @@ CREATE TABLE orders (
     item_id BIGINT NOT NULL,
     amount DECIMAL(10, 2) NOT NULL DEFAULT 0.00,
     status TINYINT NOT NULL DEFAULT 0,
+    assigned_admin_id BIGINT NULL,
+    transfer_request_id CHAR(36) NULL,
+    transfer_requested_by BIGINT NULL,
+    transfer_target_admin_id BIGINT NULL,
+    transfer_reason VARCHAR(200) NULL,
+    transfer_requested_at DATETIME(3) NULL,
+    reminder_count INT NOT NULL DEFAULT 0,
+    last_reminded_at DATETIME(3) NULL,
+    workflow_version BIGINT NOT NULL DEFAULT 0,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_orders_user
         FOREIGN KEY (user_id) REFERENCES users(user_id),
     CONSTRAINT fk_orders_item
         FOREIGN KEY (item_id) REFERENCES items(item_id),
+    CONSTRAINT fk_orders_assigned_admin
+        FOREIGN KEY (assigned_admin_id) REFERENCES users(user_id),
+    CONSTRAINT fk_orders_transfer_requester
+        FOREIGN KEY (transfer_requested_by) REFERENCES users(user_id),
+    CONSTRAINT fk_orders_transfer_target
+        FOREIGN KEY (transfer_target_admin_id) REFERENCES users(user_id),
     INDEX idx_orders_user_id (user_id),
     UNIQUE INDEX uk_orders_item_id (item_id),
     INDEX idx_orders_status (status),
     INDEX idx_orders_created_at (created_at),
     INDEX idx_orders_user_created_at (user_id, created_at),
     INDEX idx_orders_user_status_created_at (user_id, status, created_at),
-    INDEX idx_orders_status_created_at (status, created_at)
+    INDEX idx_orders_status_created_at (status, created_at),
+    INDEX idx_orders_assigned_status_created_at (assigned_admin_id, status, created_at),
+    INDEX idx_orders_transfer_target_requested_at (transfer_target_admin_id, transfer_requested_at)
+);
+
+CREATE TABLE ticket_history (
+    history_id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    event_id CHAR(36) NOT NULL,
+    item_id BIGINT NOT NULL,
+    order_id BIGINT NULL,
+    event_seq BIGINT NOT NULL,
+    event_type VARCHAR(50) NOT NULL,
+    visibility ENUM('PUBLIC', 'STAFF_ONLY', 'AUDIT_ONLY') NOT NULL DEFAULT 'STAFF_ONLY',
+    actor_user_id BIGINT NULL,
+    actor_username VARCHAR(50) NULL,
+    actor_role VARCHAR(20) NULL,
+    target_user_id BIGINT NULL,
+    from_status TINYINT NULL,
+    to_status TINYINT NULL,
+    from_admin_id BIGINT NULL,
+    to_admin_id BIGINT NULL,
+    reason VARCHAR(500) NULL,
+    source_type VARCHAR(30) NULL,
+    source_id VARCHAR(64) NULL,
+    event_payload JSON NULL,
+    occurred_at DATETIME(3) NOT NULL,
+    created_at DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    CONSTRAINT fk_ticket_history_item FOREIGN KEY (item_id) REFERENCES items(item_id),
+    CONSTRAINT fk_ticket_history_order FOREIGN KEY (order_id) REFERENCES orders(order_id),
+    UNIQUE INDEX uk_ticket_history_event_id (event_id),
+    UNIQUE INDEX uk_ticket_history_sequence (item_id, event_seq),
+    INDEX idx_ticket_history_item_time (item_id, occurred_at, history_id),
+    INDEX idx_ticket_history_actor_time (actor_user_id, occurred_at),
+    INDEX idx_ticket_history_type_time (event_type, occurred_at)
 );
 
 CREATE TABLE profiles (
