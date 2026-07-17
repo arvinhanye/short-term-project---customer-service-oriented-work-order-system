@@ -53,6 +53,19 @@ class OrderDAOTest {
                     transfer_requested_at TIMESTAMP NULL,
                     reminder_count INT NOT NULL DEFAULT 0,
                     last_reminded_at TIMESTAMP NULL,
+                    sla_policy_id BIGINT NULL,
+                    first_response_due_at TIMESTAMP NULL,
+                    next_response_due_at TIMESTAMP NULL,
+                    resolution_due_at TIMESTAMP NULL,
+                    first_responded_at TIMESTAMP NULL,
+                    last_admin_response_at TIMESTAMP NULL,
+                    resolved_at TIMESTAMP NULL,
+                    sla_state VARCHAR(20) NULL,
+                    sla_paused_at TIMESTAMP NULL,
+                    sla_pause_reason VARCHAR(100) NULL,
+                    total_sla_paused_minutes INT NOT NULL DEFAULT 0,
+                    reopen_deadline_at TIMESTAMP NULL,
+                    reopen_count INT NOT NULL DEFAULT 0,
                     workflow_version BIGINT NOT NULL DEFAULT 0,
                     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
@@ -104,6 +117,36 @@ class OrderDAOTest {
     }
 
     @Test
+    void shouldKeepSlaBreachedWhenCompletingAfterMissedFirstResponse() throws Exception {
+        try (Connection connection = dataSource.getConnection()) {
+            insert(connection, 10001L, 2150L, 1, LocalDateTime.now().minusHours(3));
+            executeSql(connection, "UPDATE orders SET assigned_admin_id = 9001, sla_state = 'ACTIVE', "
+                + "first_response_due_at = DATEADD('HOUR', -2, CURRENT_TIMESTAMP), "
+                + "resolution_due_at = DATEADD('HOUR', 2, CURRENT_TIMESTAMP) WHERE item_id = 2150");
+            Order current = orderDAO.findByItemIdForUpdate(connection, 2150L);
+            Assertions.assertEquals(1, orderDAO.updateStatusIfCurrent(connection, current, 9001L, 2));
+        }
+
+        Order completed = orderDAO.findByItemId(2150L);
+        Assertions.assertEquals("BREACHED", completed.getSlaState());
+        Assertions.assertNotNull(completed.getResolvedAt());
+    }
+
+    @Test
+    void shouldNotTurnMetResolutionIntoBreachWhenTicketIsClosedLater() throws Exception {
+        try (Connection connection = dataSource.getConnection()) {
+            insert(connection, 10001L, 2160L, 2, LocalDateTime.now().minusDays(2));
+            executeSql(connection, "UPDATE orders SET assigned_admin_id = 9001, sla_state = 'MET', "
+                + "resolved_at = DATEADD('DAY', -1, CURRENT_TIMESTAMP), "
+                + "resolution_due_at = DATEADD('HOUR', -1, CURRENT_TIMESTAMP) WHERE item_id = 2160");
+            Order current = orderDAO.findByItemIdForUpdate(connection, 2160L);
+            Assertions.assertEquals(1, orderDAO.updateStatusIfCurrent(connection, current, 9001L, 3));
+        }
+
+        Assertions.assertEquals("MET", orderDAO.findByItemId(2160L).getSlaState());
+    }
+
+    @Test
     void shouldPushAssignmentFiltersIntoPagedSql() throws Exception {
         try (Connection connection = dataSource.getConnection()) {
             executeSql(connection, "INSERT INTO users VALUES (10001, 'user01')");
@@ -122,8 +165,8 @@ class OrderDAOTest {
         var mine = orderDAO.pageTicketSummariesByAssignment(null, null, "ASSIGNED_TO", 9001L, 1, 20);
         var pending = orderDAO.pageTicketSummariesByAssignment(null, null, "PENDING_TRANSFER_TO", 9001L, 1, 20);
         var pendingByDisplayStatus = orderDAO.pageTicketSummariesByAssignment(
-            5, null, "PENDING_TRANSFER_TO", 9001L, 1, 20);
-        var allPendingByDisplayStatus = orderDAO.pageTicketSummaries(null, 5, null, 1, 20);
+            99, null, "PENDING_TRANSFER_TO", 9001L, 1, 20);
+        var allPendingByDisplayStatus = orderDAO.pageTicketSummaries(null, 99, null, 1, 20);
 
         Assertions.assertEquals(1, unassigned.getTotal());
         Assertions.assertEquals(2201L, unassigned.getRecords().get(0).getItem().getItemId());
@@ -134,7 +177,7 @@ class OrderDAOTest {
         Assertions.assertEquals(1, pendingByDisplayStatus.getTotal());
         Assertions.assertEquals(1, allPendingByDisplayStatus.getTotal());
         Assertions.assertEquals(0, allPendingByDisplayStatus.getRecords().get(0).getOrder().getStatus(),
-            "展示状态 5 不应覆盖数据库中的原生命周期状态");
+            "展示状态 99 不应覆盖数据库中的原生命周期状态");
     }
 
     private void insert(Connection connection, Long userId, Long itemId, int status, LocalDateTime createdAt) throws Exception {

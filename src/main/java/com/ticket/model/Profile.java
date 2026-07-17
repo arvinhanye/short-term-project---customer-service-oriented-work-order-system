@@ -7,6 +7,7 @@ public class Profile {
     private String idCard;
     private String address;
     private String notes;
+    private String notificationPreference;
 
     public Long getProfileId() {
         return profileId;
@@ -55,4 +56,7 @@ public class Profile {
     public void setNotes(String notes) {
         this.notes = notes;
     }
+
+    public String getNotificationPreference() { return notificationPreference; }
+    public void setNotificationPreference(String value) { notificationPreference = value; }
 }

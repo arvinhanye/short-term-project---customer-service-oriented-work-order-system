@@ -6,6 +6,7 @@ import com.ticket.dao.mongo.SystemLogDAO;
 import com.ticket.dto.ReportDTO;
 import com.ticket.exception.BusinessException;
 import com.ticket.model.User;
+import com.ticket.model.ServiceMetrics;
 import com.ticket.util.MySQLDBUtil;
 import java.sql.CallableStatement;
 import java.sql.Connection;
@@ -14,6 +15,8 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
+import java.time.LocalDateTime;
+import java.sql.PreparedStatement;
 import org.bson.Document;
 
 public class StatisticsService {
@@ -45,6 +48,96 @@ public class StatisticsService {
             return report;
         } catch (Exception ex) {
             throw new BusinessException("调用月度报表存储过程失败", ex);
+        }
+    }
+
+    public ServiceMetrics serviceMetrics(User actor, LocalDateTime from, LocalDateTime to) {
+        UserService.requireAdmin(actor);
+        LocalDateTime normalizedFrom = from == null ? LocalDateTime.now().minusDays(30) : from;
+        LocalDateTime normalizedTo = to == null ? LocalDateTime.now() : to;
+        if (!normalizedFrom.isBefore(normalizedTo)) throw new BusinessException("报表起始时间必须早于结束时间");
+        String sql = "SELECT COUNT(*) ticket_count, "
+            + "COALESCE(AVG(CASE WHEN first_responded_at IS NOT NULL THEN TIMESTAMPDIFF(SECOND, created_at, first_responded_at) / 60.0 END), 0) avg_first, "
+            + "COALESCE(AVG(CASE WHEN resolved_at IS NOT NULL THEN TIMESTAMPDIFF(SECOND, created_at, resolved_at) / 60.0 END), 0) avg_resolution, "
+            + "COALESCE(100.0 * SUM(sla_state = 'MET') / NULLIF(SUM(sla_state IN ('MET','BREACHED')), 0), 0) compliance, "
+            + "COALESCE(AVG(CASE WHEN status IN (0,1,5,6) THEN TIMESTAMPDIFF(SECOND, created_at, CURRENT_TIMESTAMP(3)) / 3600.0 END), 0) avg_backlog, "
+            + "COALESCE(100.0 * SUM(status IN (2,3) AND reopen_count = 0) / NULLIF(SUM(status IN (2,3)), 0), 0) first_contact, "
+            + "SUM(status IN (0,1,5,6)) open_backlog, SUM(sla_state = 'BREACHED') breached_count "
+            + "FROM orders WHERE created_at >= ? AND created_at < ?";
+        try (Connection connection = MySQLDBUtil.getReadConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setTimestamp(1, java.sql.Timestamp.valueOf(normalizedFrom));
+            statement.setTimestamp(2, java.sql.Timestamp.valueOf(normalizedTo));
+            try (ResultSet resultSet = statement.executeQuery()) {
+                resultSet.next();
+                return new ServiceMetrics(resultSet.getLong("ticket_count"), resultSet.getDouble("avg_first"),
+                    resultSet.getDouble("avg_resolution"), resultSet.getDouble("compliance"),
+                    resultSet.getDouble("avg_backlog"), resultSet.getDouble("first_contact"),
+                    averageSatisfaction(connection, normalizedFrom, normalizedTo),
+                    resultSet.getLong("open_backlog"), resultSet.getLong("breached_count"));
+            }
+        } catch (Exception ex) {
+            throw new BusinessException("读取服务质量指标失败", ex);
+        }
+    }
+
+    public List<Document> administratorLoad(User actor) {
+        UserService.requireAdmin(actor);
+        String sql = "SELECT u.user_id, u.username, COUNT(o.order_id) total_assigned, "
+            + "SUM(o.status IN (0,1,5,6)) open_count, SUM(o.sla_state = 'BREACHED') breached_count, "
+            + "COALESCE(AVG(CASE WHEN o.status IN (0,1,5,6) THEN TIMESTAMPDIFF(SECOND, o.created_at, CURRENT_TIMESTAMP(3)) / 3600.0 END), 0) avg_backlog_hours "
+            + "FROM users u LEFT JOIN orders o ON o.assigned_admin_id = u.user_id "
+            + "WHERE u.role IN ('ADMIN','ROOT') AND u.status = 1 GROUP BY u.user_id, u.username "
+            + "ORDER BY open_count DESC, breached_count DESC, u.user_id";
+        List<Document> result = new ArrayList<>();
+        try (Connection connection = MySQLDBUtil.getReadConnection();
+             PreparedStatement statement = connection.prepareStatement(sql);
+             ResultSet rs = statement.executeQuery()) {
+            while (rs.next()) {
+                result.add(new Document("user_id", rs.getLong("user_id"))
+                    .append("username", rs.getString("username"))
+                    .append("total_assigned", rs.getLong("total_assigned"))
+                    .append("open_count", rs.getLong("open_count"))
+                    .append("breached_count", rs.getLong("breached_count"))
+                    .append("avg_backlog_hours", rs.getDouble("avg_backlog_hours")));
+            }
+            return result;
+        } catch (Exception ex) {
+            throw new BusinessException("读取管理员负载失败", ex);
+        }
+    }
+
+    public List<Document> satisfactionTrend(User actor, int days) {
+        UserService.requireAdmin(actor);
+        int normalizedDays = Math.max(1, Math.min(days, 365));
+        String sql = "SELECT DATE(created_at) day, ROUND(AVG(rating), 2) average_rating, COUNT(*) rating_count "
+            + "FROM ticket_ratings WHERE created_at >= DATE_SUB(CURRENT_DATE, INTERVAL ? DAY) "
+            + "GROUP BY DATE(created_at) ORDER BY day";
+        List<Document> result = new ArrayList<>();
+        try (Connection connection = MySQLDBUtil.getReadConnection();
+             PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, normalizedDays);
+            try (ResultSet rs = statement.executeQuery()) {
+                while (rs.next()) result.add(new Document("day", rs.getDate("day").toLocalDate().toString())
+                    .append("average_rating", rs.getDouble("average_rating"))
+                    .append("rating_count", rs.getLong("rating_count")));
+            }
+            return result;
+        } catch (Exception ex) {
+            throw new BusinessException("读取满意度趋势失败", ex);
+        }
+    }
+
+    private double averageSatisfaction(Connection connection, LocalDateTime from, LocalDateTime to)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(AVG(rating), 0) value FROM ticket_ratings WHERE created_at >= ? AND created_at < ?")) {
+            statement.setTimestamp(1, java.sql.Timestamp.valueOf(from));
+            statement.setTimestamp(2, java.sql.Timestamp.valueOf(to));
+            try (ResultSet rs = statement.executeQuery()) {
+                rs.next();
+                return rs.getDouble("value");
+            }
         }
     }
 

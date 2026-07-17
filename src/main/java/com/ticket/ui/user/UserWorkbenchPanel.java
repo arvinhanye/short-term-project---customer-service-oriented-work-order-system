@@ -7,6 +7,8 @@ import com.ticket.model.Category;
 import com.ticket.model.Comment;
 import com.ticket.model.ItemDetail;
 import com.ticket.model.Profile;
+import com.ticket.model.StickerCatalog;
+import com.ticket.model.TicketAttachment;
 import com.ticket.model.TicketHistory;
 import com.ticket.model.User;
 import com.ticket.service.BusinessService;
@@ -14,16 +16,24 @@ import com.ticket.service.CategoryService;
 import com.ticket.service.CrossDatabaseQueryService;
 import com.ticket.service.CrossDatabaseQueryService.UserWorkOverview;
 import com.ticket.service.RecommendService;
+import com.ticket.service.NotificationService;
+import com.ticket.service.KnowledgeService;
 import com.ticket.service.UserService;
 import com.ticket.ui.MainFrame;
 import com.ticket.ui.component.DonutChartPanel;
+import com.ticket.ui.component.ChoiceDialog;
+import com.ticket.ui.component.ContentViewerDialog;
+import com.ticket.ui.component.MessageComposerDialog;
+import com.ticket.ui.component.NotificationDialog;
 import com.ticket.ui.component.TextEntryDialog;
+import com.ticket.ui.component.TicketAttachmentDialog;
 import com.ticket.ui.table.OrderTableModel;
 import com.ticket.ui.theme.AppTheme;
 import com.ticket.ui.theme.StatusTagRenderer;
 import com.ticket.ui.theme.WindowIconUtil;
 import com.ticket.util.CategoryDisplayUtil;
 import com.ticket.util.TimeFormatUtil;
+import com.ticket.util.SlaDisplayUtil;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
@@ -61,6 +71,7 @@ import javax.swing.JTextField;
 import javax.swing.JToggleButton;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingWorker;
+import javax.swing.Timer;
 import javax.swing.border.Border;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
@@ -73,8 +84,11 @@ public class UserWorkbenchPanel extends JPanel {
     private final UserService userService = new UserService();
     private final RecommendService recommendService = new RecommendService();
     private final CategoryService categoryService = new CategoryService();
+    private final NotificationService notificationService = new NotificationService();
+    private final KnowledgeService knowledgeService = new KnowledgeService();
     private final Map<Long, String> categoryNameById = new HashMap<>();
     private final JLabel headerLabel = new JLabel("未登录");
+    private final JButton notificationButton = new JButton("通知");
     private final CardLayout workspaceLayout = new CardLayout();
     private final JPanel workspaceCards = new JPanel(workspaceLayout);
     private final Map<String, JToggleButton> workspaceNavigation = new java.util.LinkedHashMap<>();
@@ -135,6 +149,7 @@ public class UserWorkbenchPanel extends JPanel {
     private User currentUser;
     private long sessionVersion;
     private long orderRequestVersion;
+    private final Timer notificationTimer = new Timer(60_000, event -> refreshNotificationBadge());
 
     public UserWorkbenchPanel(MainFrame mainFrame) {
         this.mainFrame = mainFrame;
@@ -146,16 +161,21 @@ public class UserWorkbenchPanel extends JPanel {
         JButton changePasswordButton = new JButton("修改密码");
         JButton logoutButton = new JButton("退出登录");
         AppTheme.secondary(refreshButton);
+        AppTheme.secondary(notificationButton);
         AppTheme.secondary(changePasswordButton);
         AppTheme.secondary(logoutButton);
         headerLabel.setForeground(AppTheme.MUTED);
         add(AppTheme.pageHeader("工单中心", "提交、跟进和评价你的服务请求",
-            headerLabel, refreshButton, changePasswordButton, logoutButton), BorderLayout.NORTH);
+            headerLabel, notificationButton, refreshButton, changePasswordButton, logoutButton), BorderLayout.NORTH);
 
         configureTicketTable();
         add(buildTabContent(), BorderLayout.CENTER);
 
         refreshButton.addActionListener(event -> refreshActiveWorkspace());
+        notificationButton.addActionListener(event -> {
+            if (currentUser != null) NotificationDialog.show(this, currentUser, notificationService,
+                this::refreshNotificationBadge);
+        });
         changePasswordButton.addActionListener(event -> {
             if (currentUser != null) {
                 mainFrame.showPasswordChange(currentUser, false);
@@ -438,6 +458,8 @@ public class UserWorkbenchPanel extends JPanel {
         homeStatusChart.setSegments(List.of(
             new DonutChartPanel.Segment("待处理", counts.getOrDefault(0, 0L), AppTheme.WARNING, 0),
             new DonutChartPanel.Segment("处理中", counts.getOrDefault(1, 0L), AppTheme.PRIMARY, 1),
+            new DonutChartPanel.Segment("等待客户", counts.getOrDefault(5, 0L), new Color(217, 119, 6), 5),
+            new DonutChartPanel.Segment("暂挂", counts.getOrDefault(6, 0L), new Color(100, 116, 139), 6),
             new DonutChartPanel.Segment("已完成", counts.getOrDefault(2, 0L), AppTheme.SUCCESS, 2),
             new DonutChartPanel.Segment("已关闭", counts.getOrDefault(3, 0L), new Color(107, 114, 128), 3),
             new DonutChartPanel.Segment("已取消", counts.getOrDefault(4, 0L), new Color(190, 75, 75), 4)
@@ -523,12 +545,15 @@ public class UserWorkbenchPanel extends JPanel {
         loadOrders();
         loadProfile();
         loadHomeOverview();
+        refreshNotificationBadge();
+        notificationTimer.restart();
     }
 
     /** 退出时清理当前用户视图，避免下一位用户看到上一会话的缓存数据。 */
     public void clearSession() {
         sessionVersion++;
         orderRequestVersion++;
+        notificationTimer.stop();
         if (homeOverviewWorker != null) {
             homeOverviewWorker.cancel(true);
         }
@@ -548,6 +573,7 @@ public class UserWorkbenchPanel extends JPanel {
         keywordField.setText("");
         statusFilterBox.setSelectedIndex(0);
         headerLabel.setText("未登录");
+        notificationButton.setText("通知");
         homeGreetingLabel.setText("服务概览");
         homeTotalLabel.setText("—");
         homePendingLabel.setText("—");
@@ -564,6 +590,27 @@ public class UserWorkbenchPanel extends JPanel {
         updatePageControls();
     }
 
+    private void refreshNotificationBadge() {
+        User actor = currentUser;
+        if (actor == null) {
+            notificationButton.setText("通知");
+            return;
+        }
+        long expectedSession = sessionVersion;
+        new SwingWorker<Long, Void>() {
+            @Override protected Long doInBackground() { return notificationService.unreadCount(actor); }
+            @Override protected void done() {
+                if (!isCurrentSession(actor, expectedSession)) return;
+                try {
+                    long unread = get();
+                    notificationButton.setText(unread > 0 ? "通知 (" + Math.min(99, unread) + ")" : "通知");
+                } catch (Exception ignored) {
+                    notificationButton.setText("通知");
+                }
+            }
+        }.execute();
+    }
+
     private void initOptionModels() {
         statusFilterBox.addItem(new StatusOption(null, "全部状态"));
         statusFilterBox.addItem(new StatusOption(0, "待处理"));
@@ -571,6 +618,8 @@ public class UserWorkbenchPanel extends JPanel {
         statusFilterBox.addItem(new StatusOption(2, "已完成"));
         statusFilterBox.addItem(new StatusOption(3, "已关闭"));
         statusFilterBox.addItem(new StatusOption(4, "已取消"));
+        statusFilterBox.addItem(new StatusOption(5, "等待客户回复"));
+        statusFilterBox.addItem(new StatusOption(6, "暂挂"));
 
         priorityBox.addItem(new PriorityOption("LOW", "低"));
         priorityBox.addItem(new PriorityOption("MEDIUM", "中"));
@@ -659,8 +708,10 @@ public class UserWorkbenchPanel extends JPanel {
         outer.insets = new Insets(0, 0, 0, 0);
         JPanel form = AppTheme.surface(new GridBagLayout());
         JButton recommendButton = new JButton("推荐分类");
+        JButton knowledgeButton = new JButton("推荐知识文章");
         AppTheme.primary(createTicketButton);
         AppTheme.secondary(recommendButton);
+        AppTheme.secondary(knowledgeButton);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(7, 4, 7, 10);
         gbc.anchor = GridBagConstraints.WEST;
@@ -691,6 +742,7 @@ public class UserWorkbenchPanel extends JPanel {
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 0));
         actions.setOpaque(false);
         actions.add(recommendButton);
+        actions.add(knowledgeButton);
         actions.add(createTicketButton);
         gbc.gridx = 1;
         gbc.gridy = 6;
@@ -782,6 +834,30 @@ public class UserWorkbenchPanel extends JPanel {
                     }
                 }
             }.execute();
+        });
+        knowledgeButton.addActionListener(event -> {
+            CategoryOption selected = (CategoryOption) categoryBox.getSelectedItem();
+            String text = (titleField.getText() + " " + descriptionArea.getText()).trim();
+            try {
+                List<com.ticket.model.KnowledgeArticle> articles = knowledgeService.recommend(currentUser,
+                    selected == null ? null : selected.categoryId(), text, 10);
+                if (articles.isEmpty()) {
+                    JOptionPane.showMessageDialog(this, "暂未找到匹配的知识文章。", "知识库",
+                        JOptionPane.INFORMATION_MESSAGE);
+                    return;
+                }
+                JComboBox<com.ticket.model.KnowledgeArticle> choices = new JComboBox<>(
+                    articles.toArray(new com.ticket.model.KnowledgeArticle[0]));
+                ChoiceDialog.Result<com.ticket.model.KnowledgeArticle> selection = ChoiceDialog.show(this,
+                    "知识文章推荐", "可能直接解决当前问题", "根据所选分类、标题和描述推荐",
+                    "知识文章", choices, "查看");
+                if (selection.accepted() && selection.value() != null) {
+                    com.ticket.model.KnowledgeArticle article = selection.value();
+                    ContentViewerDialog.show(this, "知识文章", article.getTitle(), article.getContent());
+                }
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, ex.getMessage(), "知识库加载失败", JOptionPane.WARNING_MESSAGE);
+            }
         });
         return panel;
     }
@@ -1150,6 +1226,8 @@ public class UserWorkbenchPanel extends JPanel {
                         idCardField.setText(profile.getIdCard());
                         addressField.setText(profile.getAddress());
                         loadProfileNotes(profile.getNotes());
+                        selectComboValue(notificationBox, notificationPreferenceText(
+                            profile.getNotificationPreference()));
                     }
                     updateRealNameAuthButton();
                 } catch (Exception ex) {
@@ -1174,6 +1252,8 @@ public class UserWorkbenchPanel extends JPanel {
         profile.setIdCard(idCardField.getText());
         profile.setAddress(addressField.getText());
         profile.setNotes(formatProfileNotes());
+        profile.setNotificationPreference(notificationPreferenceCode(
+            String.valueOf(notificationBox.getSelectedItem())));
         User updatedUser = new User();
         updatedUser.setUserId(actor.getUserId());
         updatedUser.setEmail(emailField.getText());
@@ -1246,8 +1326,25 @@ public class UserWorkbenchPanel extends JPanel {
 
     private String formatProfileNotes() {
         return "首选联系方式：" + preferredContactBox.getSelectedItem()
-            + "\n通知偏好：" + notificationBox.getSelectedItem()
             + "\n备注：" + notesArea.getText().trim();
+    }
+
+    private String notificationPreferenceCode(String value) {
+        return switch (value == null ? "" : value) {
+            case "状态变更" -> "STATUS";
+            case "仅处理结果" -> "RESULT";
+            case "不通知" -> "NONE";
+            default -> "ALL";
+        };
+    }
+
+    private String notificationPreferenceText(String value) {
+        return switch (value == null ? "" : value) {
+            case "STATUS" -> "状态变更";
+            case "RESULT" -> "仅处理结果";
+            case "NONE" -> "不通知";
+            default -> "所有回复";
+        };
     }
 
     private void showRealNameAuthDialog() {
@@ -1319,32 +1416,52 @@ public class UserWorkbenchPanel extends JPanel {
         actions.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, AppTheme.BORDER));
         JButton refreshButton = new JButton("刷新");
         JButton replyButton = new JButton("追加回复");
+        JButton attachmentButton = new JButton("查看附件");
         JButton urgeButton = new JButton("催促处理");
         JButton rateButton = new JButton("评价");
+        JButton confirmCloseButton = new JButton("确认关闭");
+        JButton reopenButton = new JButton("重新打开");
         JButton closeButton = new JButton("关闭");
         AppTheme.secondary(refreshButton);
         AppTheme.primary(replyButton);
+        AppTheme.secondary(attachmentButton);
         AppTheme.secondary(urgeButton);
         AppTheme.secondary(rateButton);
+        AppTheme.secondary(confirmCloseButton);
+        AppTheme.secondary(reopenButton);
         AppTheme.secondary(closeButton);
         actions.add(refreshButton);
         actions.add(replyButton);
+        actions.add(attachmentButton);
         actions.add(urgeButton);
         actions.add(rateButton);
+        actions.add(confirmCloseButton);
+        actions.add(reopenButton);
         actions.add(closeButton);
         dialog.add(actions, BorderLayout.SOUTH);
 
         replyButton.setEnabled(false);
+        attachmentButton.setEnabled(false);
         urgeButton.setEnabled(false);
         rateButton.setEnabled(false);
+        confirmCloseButton.setEnabled(false);
+        reopenButton.setEnabled(false);
+        ItemDetailDTO[] loadedTicket = {null};
         Runnable refreshDetail = () -> loadTicketDetail(
-            itemId, detailArea, summary, replyButton, urgeButton, rateButton);
+            itemId, detailArea, summary, replyButton, attachmentButton, urgeButton, rateButton,
+            confirmCloseButton, reopenButton, loadedTicket);
         refreshButton.addActionListener(event -> refreshDetail.run());
         replyButton.addActionListener(event -> {
-            if (addCustomerReply(itemId)) {
+            addCustomerReply(itemId, () -> {
                 refreshDetail.run();
                 loadOrders();
                 loadHomeOverview();
+            });
+        });
+        attachmentButton.addActionListener(event -> {
+            if (loadedTicket[0] != null) {
+                TicketAttachmentDialog.show(dialog, currentUser, itemId,
+                    loadedTicket[0].getComments(), businessService);
             }
         });
         urgeButton.addActionListener(event -> {
@@ -1361,6 +1478,31 @@ public class UserWorkbenchPanel extends JPanel {
                 loadHomeOverview();
             }
         });
+        confirmCloseButton.addActionListener(event -> {
+            if (JOptionPane.showConfirmDialog(dialog, "确认关闭工单 #" + itemId + "？关闭后不能重新打开。",
+                    "确认关闭", JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
+            try {
+                businessService.confirmTicketClose(currentUser, itemId);
+                refreshDetail.run();
+                loadOrders();
+                loadHomeOverview();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(dialog, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            }
+        });
+        reopenButton.addActionListener(event -> {
+            TextEntryDialog.Result result = TextEntryDialog.show(dialog, "重新打开工单", "请说明问题仍未解决的原因",
+                null, 5, 48);
+            if (!result.accepted()) return;
+            try {
+                businessService.reopenTicket(currentUser, itemId, result.text());
+                refreshDetail.run();
+                loadOrders();
+                loadHomeOverview();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(dialog, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
+            }
+        });
         closeButton.addActionListener(event -> dialog.dispose());
 
         dialog.pack();
@@ -1370,12 +1512,17 @@ public class UserWorkbenchPanel extends JPanel {
     }
 
     private void loadTicketDetail(Long itemId, JTextArea detailArea, JLabel summary,
-                                  JButton replyButton, JButton urgeButton, JButton rateButton) {
+                                  JButton replyButton, JButton attachmentButton, JButton urgeButton,
+                                  JButton rateButton, JButton confirmCloseButton, JButton reopenButton,
+                                  ItemDetailDTO[] loadedTicket) {
         detailArea.setText("正在加载工单详情...");
         summary.setText("正在加载最新状态…");
         replyButton.setEnabled(false);
+        attachmentButton.setEnabled(false);
         urgeButton.setEnabled(false);
         rateButton.setEnabled(false);
+        confirmCloseButton.setEnabled(false);
+        reopenButton.setEnabled(false);
         new SwingWorker<ItemDetailDTO, Void>() {
             @Override
             protected ItemDetailDTO doInBackground() {
@@ -1386,6 +1533,7 @@ public class UserWorkbenchPanel extends JPanel {
             protected void done() {
                 try {
                     ItemDetailDTO ticket = get();
+                    loadedTicket[0] = ticket;
                     detailArea.setText(formatTicketDetail(ticket));
                     detailArea.setCaretPosition(0);
                     Integer status = ticket.getOrder() == null ? null : ticket.getOrder().getStatus();
@@ -1394,9 +1542,22 @@ public class UserWorkbenchPanel extends JPanel {
                     int reminderCount = metadata == null ? 0 : metadata.getReminderCount();
                     summary.setText("状态：" + statusText(status) + " · 已催促 " + reminderCount + " 次");
                     replyButton.setEnabled(!Integer.valueOf(3).equals(status) && !Integer.valueOf(4).equals(status));
+                    attachmentButton.setEnabled(hasAttachments(ticket.getComments()));
                     urgeButton.setEnabled(Integer.valueOf(0).equals(status) || Integer.valueOf(1).equals(status));
-                    rateButton.setEnabled(Integer.valueOf(2).equals(status) || Integer.valueOf(3).equals(status));
+                    boolean rateableStatus = Integer.valueOf(2).equals(status) || Integer.valueOf(3).equals(status);
+                    rateButton.setEnabled(rateableStatus && !hasRating(ticket.getComments()));
+                    rateButton.setToolTipText(rateableStatus && hasRating(ticket.getComments())
+                        ? "该工单已经评价" : "对本次处理结果评分");
+                    confirmCloseButton.setEnabled(Integer.valueOf(2).equals(status));
+                    boolean withinReopenWindow = ticket.getOrder() != null
+                        && ticket.getOrder().getReopenDeadlineAt() != null
+                        && !ticket.getOrder().getReopenDeadlineAt().isBefore(LocalDateTime.now());
+                    reopenButton.setEnabled(Integer.valueOf(2).equals(status) && withinReopenWindow);
+                    reopenButton.setToolTipText(withinReopenWindow && ticket.getOrder() != null
+                        ? "可在 " + TimeFormatUtil.format(ticket.getOrder().getReopenDeadlineAt()) + " 前重新打开"
+                        : "重新打开期限已过");
                 } catch (Exception ex) {
+                    loadedTicket[0] = null;
                     detailArea.setText("加载工单详情失败：" + ex.getMessage());
                     summary.setText("详情加载失败");
                 }
@@ -1422,19 +1583,40 @@ public class UserWorkbenchPanel extends JPanel {
         }
     }
 
-    private boolean addCustomerReply(Long itemId) {
-        TextEntryDialog.Result result = TextEntryDialog.show(this, "追加回复", "请输入回复内容", null, 6, 42);
+    private void addCustomerReply(Long itemId, Runnable onSuccess) {
+        MessageComposerDialog.Result result = MessageComposerDialog.show(this, "追加回复",
+            "可发送文字、行内表情、文件或图片，附件支持拖放");
         if (!result.accepted()) {
-            return false;
+            return;
         }
-        try {
-            businessService.addCustomerReply(currentUser, itemId, result.text());
-            JOptionPane.showMessageDialog(this, "回复已提交");
-            return true;
-        } catch (Exception ex) {
-            JOptionPane.showMessageDialog(this, ex.getMessage(), "提示", JOptionPane.WARNING_MESSAGE);
-            return false;
-        }
+        User actor = currentUser;
+        long expectedSession = sessionVersion;
+        AppTheme.toast(this, result.files().isEmpty() ? "正在发送回复…" : "正在上传附件并发送…", false);
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() {
+                businessService.addCustomerReply(actor, itemId, result.text(), result.files(), result.stickerCode());
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                if (!isCurrentSession(actor, expectedSession)) {
+                    return;
+                }
+                try {
+                    get();
+                    AppTheme.toast(UserWorkbenchPanel.this, "回复已提交", false);
+                    if (onSuccess != null) {
+                        onSuccess.run();
+                    }
+                } catch (Exception ex) {
+                    Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+                    JOptionPane.showMessageDialog(UserWorkbenchPanel.this, cause.getMessage(),
+                        "发送失败", JOptionPane.WARNING_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private boolean rateTicket(Long itemId) {
@@ -1471,6 +1653,13 @@ public class UserWorkbenchPanel extends JPanel {
             builder.append("状态：").append(statusText(ticket.getOrder().getStatus())).append('\n');
             builder.append("金额：").append(ticket.getOrder().getAmount()).append('\n');
             builder.append("创建时间：").append(TimeFormatUtil.format(ticket.getOrder().getCreatedAt())).append('\n');
+            builder.append("SLA：").append(SlaDisplayUtil.countdown(ticket.getOrder())).append('\n');
+            builder.append("首次响应截止：")
+                .append(TimeFormatUtil.format(ticket.getOrder().getFirstResponseDueAt())).append('\n');
+            builder.append("下次响应截止：")
+                .append(TimeFormatUtil.format(ticket.getOrder().getNextResponseDueAt())).append('\n');
+            builder.append("解决截止：")
+                .append(TimeFormatUtil.format(ticket.getOrder().getResolutionDueAt())).append('\n');
         }
         if (ticket.getUser() != null) {
             builder.append("提交人：").append(nullToEmpty(ticket.getUser().getUsername()))
@@ -1524,10 +1713,21 @@ public class UserWorkbenchPanel extends JPanel {
                     .append(commentTypeText(comment))
                     .append('\n')
                     .append("  ")
-                    .append(nullToEmpty(comment.getContent()))
+                    .append(inlineCommentText(comment))
                     .append('\n');
                 if (comment.getRating() != null && !comment.getRating().isBlank()) {
                     builder.append("  评分：").append(comment.getRating()).append('\n');
+                }
+                if (comment.getAttachments() != null) {
+                    for (TicketAttachment attachment : comment.getAttachments()) {
+                        builder.append("  [")
+                            .append(attachment.isImage() ? "图片" : "文件")
+                            .append("] ")
+                            .append(nullToEmpty(attachment.getFileName()))
+                            .append(" · ")
+                            .append(formatFileSize(attachment.getSize()))
+                            .append('\n');
+                    }
                 }
             }
         }
@@ -1549,6 +1749,7 @@ public class UserWorkbenchPanel extends JPanel {
     private String userHistoryText(TicketHistory history) {
         return switch (history.getEventType()) {
             case "TICKET_CREATED" -> "工单已创建";
+            case "AUTO_ASSIGNED" -> "系统已自动分配处理人员";
             case "MIGRATION_SNAPSHOT" -> "历史工单已接入进度追踪，当时状态：" + statusText(history.getToStatus());
             case "TICKET_CLAIMED" -> "工单已由客服接单";
             case "STATUS_CHANGED", "AUTO_CANCELLED", "BATCH_STATUS_CHANGED" -> "状态更新："
@@ -1596,12 +1797,46 @@ public class UserWorkbenchPanel extends JPanel {
             case 2 -> "已完成";
             case 3 -> "已关闭";
             case 4 -> "已取消";
+            case 5 -> "等待客户回复";
+            case 6 -> "暂挂";
             default -> "未知(" + status + ")";
         };
     }
 
     private String nullToEmpty(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private boolean hasAttachments(List<Comment> comments) {
+        if (comments == null) {
+            return false;
+        }
+        return comments.stream().anyMatch(comment -> comment.getAttachments() != null
+            && !comment.getAttachments().isEmpty());
+    }
+
+    private boolean hasRating(List<Comment> comments) {
+        return comments != null && comments.stream().anyMatch(comment -> comment.getTags() != null
+            && comment.getTags().contains("CUSTOMER_RATING"));
+    }
+
+    private String inlineCommentText(Comment comment) {
+        String content = nullToEmpty(comment.getContent());
+        String legacyEmoji = StickerCatalog.display(comment.getStickerCode());
+        if (legacyEmoji.isBlank()) {
+            return content;
+        }
+        return content.isBlank() ? legacyEmoji : content + " " + legacyEmoji;
+    }
+
+    private String formatFileSize(long bytes) {
+        if (bytes < 1024) {
+            return bytes + " B";
+        }
+        if (bytes < 1024L * 1024) {
+            return String.format("%.1f KB", bytes / 1024d);
+        }
+        return String.format("%.1f MB", bytes / (1024d * 1024d));
     }
 
     private record CategoryOption(Long categoryId, String name) {

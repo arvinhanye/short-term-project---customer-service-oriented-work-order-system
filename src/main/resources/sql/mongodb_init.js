@@ -16,6 +16,7 @@ database.comments.createIndex({ user_id: 1, created_at: -1 });
 database.comments.createIndex({ tags: 1, created_at: -1 });
 database.comments.createIndex({ rating: 1 });
 database.comments.createIndex({ event_id: 1 }, { unique: true, sparse: true });
+database.comments.createIndex({ "attachments.file_id": 1 });
 
 database.item_details.createIndex({ item_id: 1 }, { unique: true });
 database.item_details.createIndex({ "metadata.assigned_admin_id": 1 });
@@ -30,6 +31,10 @@ database.system_logs.createIndex({ log_type: 1, timestamp: -1 });
 database.system_logs.createIndex({ log_level: 1, timestamp: -1 });
 database.system_logs.createIndex({ user_id: 1, timestamp: -1 });
 database.system_logs.createIndex({ "action_detail.target_user_id": 1, timestamp: -1 });
+database.action_logs_archive.createIndex({ created_at: 1 });
+database.system_logs_archive.createIndex({ timestamp: 1 });
+database.action_logs_archive.createIndex({ archived_at: 1 }, { expireAfterSeconds: 31536000 });
+database.system_logs_archive.createIndex({ archived_at: 1 }, { expireAfterSeconds: 31536000 });
 
 const detailSeeds = [];
 const adminIds = ["10003", "10011", "10012"];

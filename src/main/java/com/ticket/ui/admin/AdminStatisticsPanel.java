@@ -124,12 +124,15 @@ public class AdminStatisticsPanel extends JPanel {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
         toolbar.setOpaque(false);
         JButton refreshButton = new JButton("刷新");
+        JButton serviceReportButton = new JButton("服务质量与导出");
         AppTheme.primary(refreshButton);
+        AppTheme.secondary(serviceReportButton);
         toolbar.add(new JLabel("年份"));
         toolbar.add(yearSpinner);
         toolbar.add(new JLabel("月份"));
         toolbar.add(monthSpinner);
         toolbar.add(refreshButton);
+        toolbar.add(serviceReportButton);
         JPanel toolbarCard = AppTheme.surface(new BorderLayout());
         toolbarCard.add(toolbar, BorderLayout.CENTER);
         monthlyStatusLabel.setForeground(AppTheme.MUTED);
@@ -162,6 +165,8 @@ public class AdminStatisticsPanel extends JPanel {
         content.add(detailCard, BorderLayout.CENTER);
         panel.add(content, BorderLayout.CENTER);
         refreshButton.addActionListener(event -> loadMonthlyReport());
+        serviceReportButton.addActionListener(event ->
+            ServiceReportDialog.show(this, currentUser, statisticsService));
         return panel;
     }
 

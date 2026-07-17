@@ -29,16 +29,22 @@ public class OrderDAO extends BaseDAO {
     }
 
     public long insert(Connection connection, Order order) throws Exception {
-        String sql = "INSERT INTO orders (user_id, item_id, amount, status, reminder_count, workflow_version, created_at) "
-            + "VALUES (?, ?, ?, ?, ?, ?, ?)";
+        String sql = "INSERT INTO orders (user_id, item_id, amount, status, assigned_admin_id, reminder_count, "
+            + "sla_policy_id, first_response_due_at, resolution_due_at, sla_state, workflow_version, created_at) "
+            + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
         try (PreparedStatement statement = connection.prepareStatement(sql, Statement.RETURN_GENERATED_KEYS)) {
             statement.setLong(1, order.getUserId());
             statement.setLong(2, order.getItemId());
             statement.setBigDecimal(3, order.getAmount());
             statement.setInt(4, order.getStatus());
-            statement.setInt(5, order.getReminderCount());
-            statement.setLong(6, order.getWorkflowVersion());
-            statement.setTimestamp(7, Timestamp.valueOf(order.getCreatedAt()));
+            setNullableLong(statement, 5, order.getAssignedAdminId());
+            statement.setInt(6, order.getReminderCount());
+            setNullableLong(statement, 7, order.getSlaPolicyId());
+            setNullableTimestamp(statement, 8, order.getFirstResponseDueAt());
+            setNullableTimestamp(statement, 9, order.getResolutionDueAt());
+            statement.setString(10, order.getSlaState());
+            statement.setLong(11, order.getWorkflowVersion());
+            statement.setTimestamp(12, Timestamp.valueOf(order.getCreatedAt()));
             statement.executeUpdate();
             try (var keys = statement.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -173,7 +179,7 @@ public class OrderDAO extends BaseDAO {
         int normalizedPageSize = normalizeLimit(pageSize);
         String normalizedKeyword = keyword == null ? "" : keyword.trim();
         boolean byUser = userId != null;
-        boolean byPendingConfirmation = Integer.valueOf(5).equals(status);
+        boolean byPendingConfirmation = Integer.valueOf(99).equals(status);
         boolean byStatus = status != null && !byPendingConfirmation;
         boolean byKeyword = !normalizedKeyword.isBlank();
         String where = " WHERE 1 = 1" + (byUser ? " AND o.user_id = ?" : "")
@@ -186,7 +192,7 @@ public class OrderDAO extends BaseDAO {
             statement -> bindSummaryFilter(statement, userId, status, normalizedKeyword, byUser, byStatus, byKeyword),
             rs -> rs.getLong("cnt"));
         List<CrossTicketDTO> records = query("SELECT " + summaryColumns()
-                + from + where + " ORDER BY o.created_at DESC, o.order_id DESC LIMIT ? OFFSET ?",
+                + from + where + " ORDER BY " + slaDueOrder() + ", o.created_at DESC, o.order_id DESC LIMIT ? OFFSET ?",
             statement -> {
                 int index = bindSummaryFilter(statement, userId, status, normalizedKeyword, byUser, byStatus, byKeyword);
                 statement.setInt(index++, normalizedPageSize);
@@ -202,7 +208,7 @@ public class OrderDAO extends BaseDAO {
         int normalizedPage = normalizePage(page);
         int normalizedPageSize = normalizeLimit(pageSize);
         String normalizedKeyword = keyword == null ? "" : keyword.trim();
-        boolean byPendingConfirmation = Integer.valueOf(5).equals(status);
+        boolean byPendingConfirmation = Integer.valueOf(99).equals(status);
         boolean byStatus = status != null && !byPendingConfirmation;
         boolean byKeyword = !normalizedKeyword.isBlank();
         String assignmentClause = assignmentClause(assignmentScope);
@@ -218,7 +224,7 @@ public class OrderDAO extends BaseDAO {
             statement -> bindAssignmentFilter(statement, status, normalizedKeyword, byStatus, byKeyword,
                 needsAdmin, adminId), rs -> rs.getLong("cnt"));
         List<CrossTicketDTO> records = query("SELECT " + summaryColumns() + from + where
-                + " ORDER BY o.created_at DESC, o.order_id DESC LIMIT ? OFFSET ?",
+                + " ORDER BY " + slaDueOrder() + ", o.created_at DESC, o.order_id DESC LIMIT ? OFFSET ?",
             statement -> {
                 int index = bindAssignmentFilter(statement, status, normalizedKeyword, byStatus, byKeyword,
                     needsAdmin, adminId);
@@ -233,7 +239,7 @@ public class OrderDAO extends BaseDAO {
         boolean needsAdmin = !"UNASSIGNED".equals(assignmentScope);
         if (needsAdmin && adminId == null) return List.of();
         return query("SELECT " + summaryColumns() + summaryFrom() + " WHERE 1 = 1" + assignmentClause
-                + " ORDER BY o.created_at DESC, o.order_id DESC",
+                + " ORDER BY " + slaDueOrder() + ", o.created_at DESC, o.order_id DESC",
             statement -> {
                 if (needsAdmin) statement.setLong(1, adminId);
             }, this::mapTicketSummary);
@@ -308,14 +314,99 @@ public class OrderDAO extends BaseDAO {
     public int updateStatusIfCurrent(Connection connection, Order current, Long actorAdminId, int newStatus)
             throws Exception {
         try (PreparedStatement statement = connection.prepareStatement(
-                "UPDATE orders SET status = ?, workflow_version = workflow_version + 1 "
+                "UPDATE orders SET status = ?, resolved_at = CASE WHEN ? IN (2, 3) "
+                    + "THEN COALESCE(resolved_at, CURRENT_TIMESTAMP(3)) ELSE resolved_at END, "
+                    + "reopen_deadline_at = CASE WHEN ? = 2 THEN ? "
+                    + "ELSE reopen_deadline_at END, "
+                    + "sla_state = CASE WHEN ? = 4 THEN 'CANCELLED' WHEN ? = 2 THEN "
+                    + "CASE WHEN sla_state = 'BREACHED' "
+                    + "OR (first_response_due_at IS NOT NULL AND ((first_responded_at IS NULL "
+                    + "AND CURRENT_TIMESTAMP(3) > first_response_due_at) "
+                    + "OR first_responded_at > first_response_due_at)) "
+                    + "OR (next_response_due_at IS NOT NULL AND CURRENT_TIMESTAMP(3) > next_response_due_at) "
+                    + "OR (resolution_due_at IS NOT NULL AND CURRENT_TIMESTAMP(3) > resolution_due_at) "
+                    + "THEN 'BREACHED' ELSE 'MET' END ELSE sla_state END, "
+                    + "workflow_version = workflow_version + 1 "
                     + "WHERE order_id = ? AND status = ? AND workflow_version = ? "
                     + "AND assigned_admin_id = ? AND transfer_request_id IS NULL")) {
             statement.setInt(1, newStatus);
-            statement.setLong(2, current.getOrderId());
-            statement.setInt(3, current.getStatus());
-            statement.setLong(4, current.getWorkflowVersion());
-            statement.setLong(5, actorAdminId);
+            statement.setInt(2, newStatus);
+            statement.setInt(3, newStatus);
+            setNullableTimestamp(statement, 4, newStatus == 2 ? LocalDateTime.now().plusDays(7) : null);
+            statement.setInt(5, newStatus);
+            statement.setInt(6, newStatus);
+            statement.setLong(7, current.getOrderId());
+            statement.setInt(8, current.getStatus());
+            statement.setLong(9, current.getWorkflowVersion());
+            statement.setLong(10, actorAdminId);
+            return statement.executeUpdate();
+        }
+    }
+
+    public int pauseSla(Connection connection, Order current, Long actorAdminId, int newStatus, String reason,
+                        LocalDateTime pausedAt) throws Exception {
+        String sql = "UPDATE orders SET status = ?, sla_paused_at = COALESCE(sla_paused_at, ?), "
+            + "sla_pause_reason = ?, workflow_version = workflow_version + 1 "
+            + "WHERE order_id = ? AND status = ? AND workflow_version = ? AND assigned_admin_id = ? "
+            + "AND transfer_request_id IS NULL";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setInt(1, newStatus);
+            statement.setTimestamp(2, Timestamp.valueOf(pausedAt));
+            statement.setString(3, reason);
+            statement.setLong(4, current.getOrderId());
+            statement.setInt(5, current.getStatus());
+            statement.setLong(6, current.getWorkflowVersion());
+            statement.setLong(7, actorAdminId);
+            return statement.executeUpdate();
+        }
+    }
+
+    public int resumeSla(Connection connection, Order current, Long actorAdminId, LocalDateTime resumedAt)
+            throws Exception {
+        long pausedMinutes = pausedMinutes(current, resumedAt);
+        String sql = "UPDATE orders SET status = 1, first_response_due_at = DATE_ADD(first_response_due_at, INTERVAL ? MINUTE), "
+            + "next_response_due_at = DATE_ADD(next_response_due_at, INTERVAL ? MINUTE), "
+            + "resolution_due_at = DATE_ADD(resolution_due_at, INTERVAL ? MINUTE), "
+            + "total_sla_paused_minutes = total_sla_paused_minutes + ?, sla_paused_at = NULL, "
+            + "sla_pause_reason = NULL, workflow_version = workflow_version + 1 "
+            + "WHERE order_id = ? AND status IN (5, 6) AND workflow_version = ? AND assigned_admin_id = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, pausedMinutes);
+            statement.setLong(2, pausedMinutes);
+            statement.setLong(3, pausedMinutes);
+            statement.setLong(4, pausedMinutes);
+            statement.setLong(5, current.getOrderId());
+            statement.setLong(6, current.getWorkflowVersion());
+            statement.setLong(7, actorAdminId);
+            return statement.executeUpdate();
+        }
+    }
+
+    public int confirmClose(Connection connection, Order current, Long userId) throws Exception {
+        String sql = "UPDATE orders SET status = 3, workflow_version = workflow_version + 1 "
+            + "WHERE order_id = ? AND user_id = ? AND status = 2 AND workflow_version = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setLong(1, current.getOrderId());
+            statement.setLong(2, userId);
+            statement.setLong(3, current.getWorkflowVersion());
+            return statement.executeUpdate();
+        }
+    }
+
+    public int reopen(Connection connection, Order current, Long userId, LocalDateTime nextResponseDueAt,
+                      LocalDateTime resolutionDueAt, LocalDateTime now) throws Exception {
+        String sql = "UPDATE orders SET status = 1, resolved_at = NULL, reopen_deadline_at = NULL, "
+            + "reopen_count = reopen_count + 1, next_response_due_at = ?, resolution_due_at = ?, "
+            + "sla_state = CASE WHEN sla_policy_id IS NULL THEN sla_state ELSE 'ACTIVE' END, "
+            + "workflow_version = workflow_version + 1 WHERE order_id = ? AND user_id = ? AND status = 2 "
+            + "AND reopen_deadline_at IS NOT NULL AND reopen_deadline_at >= ? AND workflow_version = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableTimestamp(statement, 1, nextResponseDueAt);
+            setNullableTimestamp(statement, 2, resolutionDueAt);
+            statement.setLong(3, current.getOrderId());
+            statement.setLong(4, userId);
+            statement.setTimestamp(5, Timestamp.valueOf(now));
+            statement.setLong(6, current.getWorkflowVersion());
             return statement.executeUpdate();
         }
     }
@@ -415,6 +506,99 @@ public class OrderDAO extends BaseDAO {
         }
     }
 
+    public int recordAdminResponse(Connection connection, Order current, LocalDateTime respondedAt) throws Exception {
+        String sql = "UPDATE orders SET first_responded_at = COALESCE(first_responded_at, ?), "
+            + "last_admin_response_at = ?, next_response_due_at = NULL, "
+            + "sla_state = CASE WHEN sla_state = 'ACTIVE' AND ((first_responded_at IS NULL "
+            + "AND first_response_due_at IS NOT NULL AND ? > first_response_due_at) "
+            + "OR (next_response_due_at IS NOT NULL AND ? > next_response_due_at) "
+            + "OR (resolution_due_at IS NOT NULL AND ? > resolution_due_at)) THEN 'BREACHED' ELSE sla_state END, "
+            + "workflow_version = workflow_version + 1 WHERE item_id = ? AND workflow_version = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            Timestamp timestamp = Timestamp.valueOf(respondedAt);
+            statement.setTimestamp(1, timestamp);
+            statement.setTimestamp(2, timestamp);
+            statement.setTimestamp(3, timestamp);
+            statement.setTimestamp(4, timestamp);
+            statement.setTimestamp(5, timestamp);
+            statement.setLong(6, current.getItemId());
+            statement.setLong(7, current.getWorkflowVersion());
+            return statement.executeUpdate();
+        }
+    }
+
+    public int recordCustomerReply(Connection connection, Order current, LocalDateTime nextResponseDueAt)
+            throws Exception {
+        long pausedMinutes = Integer.valueOf(5).equals(current.getStatus())
+            ? pausedMinutes(current, LocalDateTime.now()) : 0;
+        String sql = "UPDATE orders SET next_response_due_at = CASE WHEN first_responded_at IS NOT NULL "
+            + "THEN ? ELSE DATE_ADD(next_response_due_at, INTERVAL ? MINUTE) END, "
+            + "first_response_due_at = DATE_ADD(first_response_due_at, INTERVAL ? MINUTE), "
+            + "resolution_due_at = DATE_ADD(resolution_due_at, INTERVAL ? MINUTE), "
+            + "status = CASE WHEN status = 5 THEN 1 ELSE status END, "
+            + "total_sla_paused_minutes = total_sla_paused_minutes + CASE WHEN status = 5 THEN ? ELSE 0 END, "
+            + "sla_paused_at = CASE WHEN status = 5 THEN NULL ELSE sla_paused_at END, "
+            + "sla_pause_reason = CASE WHEN status = 5 THEN NULL ELSE sla_pause_reason END, "
+            + "workflow_version = workflow_version + 1 "
+            + "WHERE item_id = ? AND workflow_version = ?";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            setNullableTimestamp(statement, 1, nextResponseDueAt);
+            statement.setLong(2, pausedMinutes);
+            statement.setLong(3, pausedMinutes);
+            statement.setLong(4, pausedMinutes);
+            statement.setLong(5, pausedMinutes);
+            statement.setLong(6, current.getItemId());
+            statement.setLong(7, current.getWorkflowVersion());
+            return statement.executeUpdate();
+        }
+    }
+
+    private long pausedMinutes(Order current, LocalDateTime resumedAt) {
+        if (current == null || current.getSlaPausedAt() == null || resumedAt == null) return 0;
+        return Math.max(0, java.time.Duration.between(current.getSlaPausedAt(), resumedAt).toMinutes());
+    }
+
+    public List<Order> findSlaAttentionForAdmin(Long adminId, LocalDateTime threshold) {
+        return query("SELECT * FROM orders WHERE assigned_admin_id = ? AND status IN (0, 1) "
+                + "AND sla_state IN ('ACTIVE', 'BREACHED') AND (first_response_due_at <= ? "
+                + "OR next_response_due_at <= ? OR resolution_due_at <= ?) ORDER BY resolution_due_at, order_id",
+            statement -> {
+                statement.setLong(1, adminId);
+                Timestamp value = Timestamp.valueOf(threshold);
+                statement.setTimestamp(2, value);
+                statement.setTimestamp(3, value);
+                statement.setTimestamp(4, value);
+            }, this::mapOrder);
+    }
+
+    public List<Order> findSlaAttention(LocalDateTime threshold) {
+        return query("SELECT * FROM orders WHERE status IN (0, 1) "
+                + "AND sla_state IN ('ACTIVE', 'BREACHED') AND (first_response_due_at <= ? "
+                + "OR next_response_due_at <= ? OR resolution_due_at <= ?) "
+                + "ORDER BY resolution_due_at, order_id",
+            statement -> {
+                Timestamp value = Timestamp.valueOf(threshold);
+                statement.setTimestamp(1, value);
+                statement.setTimestamp(2, value);
+                statement.setTimestamp(3, value);
+            }, this::mapOrder);
+    }
+
+    public void markSlaBreached(Connection connection, Long orderId, LocalDateTime now) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE orders SET sla_state = 'BREACHED' WHERE order_id = ? AND sla_state = 'ACTIVE' "
+                    + "AND ((first_responded_at IS NULL AND first_response_due_at IS NOT NULL AND first_response_due_at < ?) "
+                    + "OR (next_response_due_at IS NOT NULL AND next_response_due_at < ?) "
+                    + "OR (resolution_due_at IS NOT NULL AND resolution_due_at < ?))")) {
+            statement.setLong(1, orderId);
+            Timestamp value = Timestamp.valueOf(now);
+            statement.setTimestamp(2, value);
+            statement.setTimestamp(3, value);
+            statement.setTimestamp(4, value);
+            statement.executeUpdate();
+        }
+    }
+
     public int migrateWorkflowSnapshot(Connection connection, Order current, Long assignedAdminId,
                                        String transferRequestId, Long transferRequestedBy,
                                        Long transferTargetAdminId, String transferReason,
@@ -459,12 +643,14 @@ public class OrderDAO extends BaseDAO {
     public int updateStatusForMaintenance(Connection connection, Order current, int newStatus) throws Exception {
         String sql = "UPDATE orders SET status = ?, transfer_request_id = NULL, transfer_requested_by = NULL, "
             + "transfer_target_admin_id = NULL, transfer_reason = NULL, transfer_requested_at = NULL, "
+            + "sla_state = CASE WHEN ? = 4 THEN 'CANCELLED' ELSE sla_state END, "
             + "workflow_version = workflow_version + 1 WHERE order_id = ? AND status = ? AND workflow_version = ?";
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setInt(1, newStatus);
-            statement.setLong(2, current.getOrderId());
-            statement.setInt(3, current.getStatus());
-            statement.setLong(4, current.getWorkflowVersion());
+            statement.setInt(2, newStatus);
+            statement.setLong(3, current.getOrderId());
+            statement.setInt(4, current.getStatus());
+            statement.setLong(5, current.getWorkflowVersion());
             return statement.executeUpdate();
         }
     }
@@ -537,6 +723,22 @@ public class OrderDAO extends BaseDAO {
             + "JOIN users u ON o.user_id = u.user_id";
     }
 
+    private String slaDueOrder() {
+        return "CASE WHEN o.sla_state = 'BREACHED' THEN 0 WHEN o.sla_state = 'ACTIVE' THEN 1 ELSE 2 END, "
+            + "CASE WHEN o.sla_state IN ('ACTIVE', 'BREACHED') THEN CASE "
+            + "WHEN o.first_responded_at IS NULL THEN CASE "
+            + "WHEN o.first_response_due_at IS NULL THEN o.resolution_due_at "
+            + "WHEN o.resolution_due_at IS NULL THEN o.first_response_due_at "
+            + "ELSE LEAST(o.first_response_due_at, o.resolution_due_at) END "
+            + "ELSE CASE WHEN o.next_response_due_at IS NULL THEN o.resolution_due_at "
+            + "WHEN o.resolution_due_at IS NULL THEN o.next_response_due_at "
+            + "ELSE LEAST(o.next_response_due_at, o.resolution_due_at) END END ELSE NULL END IS NULL, "
+            + "CASE WHEN o.sla_state IN ('ACTIVE', 'BREACHED') THEN CASE "
+            + "WHEN o.first_responded_at IS NULL THEN COALESCE(LEAST(o.first_response_due_at, o.resolution_due_at), "
+            + "o.first_response_due_at, o.resolution_due_at) ELSE COALESCE(LEAST(o.next_response_due_at, "
+            + "o.resolution_due_at), o.next_response_due_at, o.resolution_due_at) END ELSE NULL END";
+    }
+
     private CrossTicketDTO mapTicketSummary(java.sql.ResultSet resultSet) throws java.sql.SQLException {
         Item item = new Item();
         item.setItemId(resultSet.getLong("item_id"));
@@ -583,7 +785,11 @@ public class OrderDAO extends BaseDAO {
         return "o.order_id, o.user_id, o.item_id, o.amount, o.status AS order_status, "
             + "o.assigned_admin_id, o.transfer_request_id, o.transfer_requested_by, "
             + "o.transfer_target_admin_id, o.transfer_reason, o.transfer_requested_at, "
-            + "o.reminder_count, o.last_reminded_at, o.workflow_version, "
+            + "o.reminder_count, o.last_reminded_at, o.sla_policy_id, o.first_response_due_at, "
+            + "o.next_response_due_at, o.resolution_due_at, o.first_responded_at, "
+            + "o.last_admin_response_at, o.resolved_at, o.sla_state, o.sla_paused_at, "
+            + "o.sla_pause_reason, o.total_sla_paused_minutes, o.reopen_deadline_at, o.reopen_count, "
+            + "o.workflow_version, "
             + "o.created_at AS order_created_at, i.title, i.category_id, i.status AS item_status, "
             + "i.created_at AS item_created_at, i.updated_at AS item_updated_at, c.name AS category_name, u.username";
     }
@@ -599,7 +805,25 @@ public class OrderDAO extends BaseDAO {
         order.setReminderCount(resultSet.getInt(prefix + "reminder_count"));
         Timestamp remindedAt = resultSet.getTimestamp(prefix + "last_reminded_at");
         order.setLastRemindedAt(remindedAt == null ? null : remindedAt.toLocalDateTime());
+        order.setSlaPolicyId(nullableLong(resultSet, prefix + "sla_policy_id"));
+        order.setFirstResponseDueAt(nullableTime(resultSet, prefix + "first_response_due_at"));
+        order.setNextResponseDueAt(nullableTime(resultSet, prefix + "next_response_due_at"));
+        order.setResolutionDueAt(nullableTime(resultSet, prefix + "resolution_due_at"));
+        order.setFirstRespondedAt(nullableTime(resultSet, prefix + "first_responded_at"));
+        order.setLastAdminResponseAt(nullableTime(resultSet, prefix + "last_admin_response_at"));
+        order.setResolvedAt(nullableTime(resultSet, prefix + "resolved_at"));
+        order.setSlaState(resultSet.getString(prefix + "sla_state"));
+        order.setSlaPausedAt(nullableTime(resultSet, prefix + "sla_paused_at"));
+        order.setSlaPauseReason(resultSet.getString(prefix + "sla_pause_reason"));
+        order.setTotalSlaPausedMinutes(resultSet.getInt(prefix + "total_sla_paused_minutes"));
+        order.setReopenDeadlineAt(nullableTime(resultSet, prefix + "reopen_deadline_at"));
+        order.setReopenCount(resultSet.getInt(prefix + "reopen_count"));
         order.setWorkflowVersion(resultSet.getLong(prefix + "workflow_version"));
+    }
+
+    private LocalDateTime nullableTime(java.sql.ResultSet resultSet, String column) throws java.sql.SQLException {
+        Timestamp value = resultSet.getTimestamp(column);
+        return value == null ? null : value.toLocalDateTime();
     }
 
     private Long nullableLong(java.sql.ResultSet resultSet, String column) throws java.sql.SQLException {

@@ -11,6 +11,8 @@ public class Comment {
     private String content;
     private String rating;
     private List<String> tags = new ArrayList<>();
+    private List<TicketAttachment> attachments = new ArrayList<>();
+    private String stickerCode;
     private Instant createdAt;
 
     public String getEventId() {
@@ -59,6 +61,22 @@ public class Comment {
 
     public void setTags(List<String> tags) {
         this.tags = tags;
+    }
+
+    public List<TicketAttachment> getAttachments() {
+        return attachments;
+    }
+
+    public void setAttachments(List<TicketAttachment> attachments) {
+        this.attachments = attachments;
+    }
+
+    public String getStickerCode() {
+        return stickerCode;
+    }
+
+    public void setStickerCode(String stickerCode) {
+        this.stickerCode = stickerCode;
     }
 
     public Instant getCreatedAt() {

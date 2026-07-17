@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import com.ticket.exception.BusinessException;
 import com.ticket.model.User;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class BusinessServiceValidationTest {
@@ -55,6 +58,10 @@ class BusinessServiceValidationTest {
         assertDoesNotThrow(() -> BusinessService.validateStatusTransition(0, 4));
         assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 2));
         assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 4));
+        assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 5));
+        assertDoesNotThrow(() -> BusinessService.validateStatusTransition(1, 6));
+        assertDoesNotThrow(() -> BusinessService.validateStatusTransition(5, 1));
+        assertDoesNotThrow(() -> BusinessService.validateStatusTransition(6, 1));
         assertDoesNotThrow(() -> BusinessService.validateStatusTransition(2, 3));
 
         assertThrows(BusinessException.class, () -> BusinessService.validateStatusTransition(0, 2));
@@ -70,6 +77,41 @@ class BusinessServiceValidationTest {
         assertThrows(BusinessException.class, () -> BusinessService.requireReminderEligibleStatus(2));
         assertThrows(BusinessException.class, () -> BusinessService.requireReminderEligibleStatus(3));
         assertThrows(BusinessException.class, () -> BusinessService.requireReminderEligibleStatus(4));
+    }
+
+    @Test
+    void messageAllowsTextAttachmentOrStickerButRejectsAnEmptyPayload() throws Exception {
+        assertThrows(BusinessException.class,
+            () -> BusinessService.validateMessagePayload("  ", List.of(), null));
+        assertDoesNotThrow(() ->
+            BusinessService.validateMessagePayload("收到", List.of(), null));
+        assertDoesNotThrow(() ->
+            BusinessService.validateMessagePayload("已经处理好了 😊 请确认", List.of(), null));
+        assertDoesNotThrow(() ->
+            BusinessService.validateMessagePayload("", List.of(), "ACKNOWLEDGED"));
+        assertThrows(BusinessException.class, () ->
+            BusinessService.validateMessagePayload("", List.of(), "UNKNOWN_STICKER"));
+
+        Path attachment = Files.createTempFile("ticket-attachment-test", ".txt");
+        try {
+            Files.writeString(attachment, "attachment");
+            assertDoesNotThrow(() ->
+                BusinessService.validateMessagePayload("", List.of(attachment), null));
+        } finally {
+            Files.deleteIfExists(attachment);
+        }
+    }
+
+    @Test
+    void messageRejectsTooManyAttachmentsBeforeUpload() throws Exception {
+        Path attachment = Files.createTempFile("ticket-attachment-test", ".txt");
+        try {
+            Files.writeString(attachment, "attachment");
+            assertThrows(BusinessException.class, () -> BusinessService.validateMessagePayload(
+                "", List.of(attachment, attachment, attachment, attachment, attachment, attachment), null));
+        } finally {
+            Files.deleteIfExists(attachment);
+        }
     }
 
     private User staff(long userId, String role) {

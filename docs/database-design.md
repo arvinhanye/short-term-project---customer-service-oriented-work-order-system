@@ -6,6 +6,7 @@
 
 - MySQL 保存用户、分类、工单主表、工单处理记录和用户资料等结构化数据。
 - MongoDB 保存工单详情、评论、行为日志和系统日志等半结构化或高增长数据。
+- 工单评论中的附件元数据保存在 `comments.attachments`，文件二进制保存在 MongoDB GridFS 的 `ticket_files.files` / `ticket_files.chunks`。新发送的表情直接作为 Unicode 内容写入 `comments.content`，可以出现在文字任意位置；`comments.sticker_code` 仅保留用于兼容旧版独立表情数据，读取时会转换成正文末尾的行内表情。
 - Java DAO 层分别通过 JDBC/HikariCP 和 MongoDB Java Sync Driver 访问两类数据库。
 
 ## 2. MySQL E-R 图
@@ -14,10 +15,16 @@
 erDiagram
     users ||--o| profiles : has
     users ||--o{ orders : submits
+    users ||--o{ notifications : receives
+    users ||--o{ ticket_ratings : submits
     users ||--o{ system_log_import_records : imports
     categories ||--o{ categories : parent
     categories ||--o{ items : classifies
+    categories ||--o{ ticket_assignment_rules : matches
     items ||--|| orders : owns
+    items ||--o{ notifications : references
+    items ||--o{ ticket_ratings : receives
+    sla_policies ||--o{ orders : governs
     items ||--o{ ticket_history : records
     orders ||--o{ ticket_history : versions
 
@@ -40,6 +47,7 @@ erDiagram
         VARCHAR id_card
         VARCHAR address
         TEXT notes
+        VARCHAR notification_preference
     }
 
     categories {
@@ -67,8 +75,50 @@ erDiagram
         CHAR transfer_request_id
         BIGINT transfer_target_admin_id FK
         INT reminder_count
+        BIGINT sla_policy_id FK
+        DATETIME first_response_due_at
+        DATETIME next_response_due_at
+        DATETIME resolution_due_at
+        ENUM sla_state
         BIGINT workflow_version
         DATETIME created_at
+    }
+
+    sla_policies {
+        BIGINT policy_id PK
+        VARCHAR priority UK
+        INT first_response_minutes
+        INT next_response_minutes
+        INT resolution_minutes
+        TINYINT business_hours_only
+    }
+
+    ticket_assignment_rules {
+        BIGINT rule_id PK
+        BIGINT category_id FK
+        VARCHAR priority
+        ENUM strategy
+        BIGINT target_admin_id FK
+        TINYINT enabled
+        INT sort_order
+    }
+
+    notifications {
+        BIGINT notification_id PK
+        BIGINT user_id FK
+        BIGINT item_id FK
+        VARCHAR notification_type
+        VARCHAR dedup_key UK
+        DATETIME read_at
+        DATETIME created_at
+    }
+
+    ticket_ratings {
+        BIGINT rating_id PK
+        BIGINT item_id FK
+        BIGINT user_id FK
+        CHAR event_id UK
+        TINYINT rating
     }
 
     ticket_history {
@@ -131,6 +181,7 @@ erDiagram
 | id_card | VARCHAR(20) |  | 身份证号 |
 | address | VARCHAR(500) |  | 地址 |
 | notes | TEXT |  | 备注 |
+| notification_preference | VARCHAR(20) | NOT NULL, DEFAULT 'ALL' | `ALL` 全部、`STATUS` 状态、`RESULT` 仅结果、`NONE` 不通知 |
 
 ### 3.3 categories
 
@@ -173,7 +224,7 @@ erDiagram
 | item_id | BIGINT | FK | 工单编号 |
 | amount | DECIMAL(10,2) | NOT NULL | 涉及金额 |
 | status | TINYINT | NOT NULL, DEFAULT 0 | 0 待处理，1 处理中，2 已完成，3 已关闭，4 已取消 |
-| assigned_admin_id | BIGINT | FK, NULL | 当前负责人；新工单为空 |
+| assigned_admin_id | BIGINT | FK, NULL | 当前负责人；自动分配无结果时为空 |
 | transfer_request_id | CHAR(36) | NULL | 待确认转派请求唯一编号，用于防止旧弹窗误操作新请求 |
 | transfer_requested_by | BIGINT | FK, NULL | 转派发起人 |
 | transfer_target_admin_id | BIGINT | FK, NULL | 目标管理员 |
@@ -181,6 +232,13 @@ erDiagram
 | transfer_requested_at | DATETIME(3) | NULL | 转派发起时间 |
 | reminder_count | INT | NOT NULL, DEFAULT 0 | 用户催促次数 |
 | last_reminded_at | DATETIME(3) | NULL | 最近催促时间 |
+| sla_policy_id | BIGINT | FK, NULL | 创建时匹配的 SLA 策略 |
+| first_response_due_at | DATETIME(3) | NULL | 首次管理员响应截止时间 |
+| next_response_due_at | DATETIME(3) | NULL | 客户追加回复后的下次响应截止时间 |
+| resolution_due_at | DATETIME(3) | NULL | 解决截止时间 |
+| first_responded_at / last_admin_response_at | DATETIME(3) | NULL | 首次和最近管理员回复时间 |
+| resolved_at | DATETIME(3) | NULL | 完成或关闭时间 |
+| sla_state | ENUM | NULL | `ACTIVE` / `MET` / `BREACHED` / `CANCELLED` |
 | workflow_version | BIGINT | NOT NULL | 工单事件序号和乐观锁版本 |
 | created_at | DATETIME | NOT NULL | 提交时间 |
 
@@ -194,8 +252,25 @@ erDiagram
 | `idx_orders_status_created_at(status, created_at)` | 管理员按状态筛选分页 |
 | `idx_orders_assigned_status_created_at(assigned_admin_id, status, created_at)` | 按负责人和状态读取工作队列 |
 | `idx_orders_transfer_target_requested_at(transfer_target_admin_id, transfer_requested_at)` | 查询待本人确认的转派请求 |
+| `idx_orders_sla_state_due(sla_state, first_response_due_at, next_response_due_at, resolution_due_at)` | SLA 风险队列和超时补扫 |
 
-### 3.6 ticket_history
+### 3.6 sla_policies
+
+按优先级保存首次响应、下次响应和解决分钟数。默认策略均仅计算工作日 09:00-18:00，`priority` 唯一，创建工单时把匹配结果和截止时间固化到 `orders`。
+
+### 3.7 ticket_assignment_rules
+
+自动分配的“条件 → 动作”规则表。`category_id` 和 `priority` 为可空条件，同时指定时比兜底规则更具体；`strategy` 支持 `SPECIFIC_ADMIN` 和 `LEAST_LOADED`，再按 `sort_order` 决定同等具体度的顺序。分类删除时关联规则级联删除。
+
+### 3.8 notifications
+
+站内通知表。`(user_id,dedup_key)` 唯一，保证重复刷新 SLA 或重试业务事件时不会制造重复消息；`read_at` 为空表示未读。SLA 超时除通知当前负责人外，还会写入 ROOT 的升级通知。
+
+### 3.9 ticket_ratings
+
+评价的 MySQL 唯一登记表。评价正文仍保存在 MongoDB `comments`，本表通过 `(item_id,user_id)` 唯一约束防止并发重复评价，`event_id` 与工单历史事件关联，`rating` 限制为 1—5。
+
+### 3.10 ticket_history
 
 追加式工单历史账本。每次业务操作先锁定 `orders`，在同一 MySQL 事务中更新当前态并插入一条历史；`(item_id,event_seq)` 和 `event_id` 双重唯一，触发器禁止 UPDATE/DELETE。
 
@@ -212,7 +287,7 @@ erDiagram
 
 旧工单只回填 `MIGRATION_SNAPSHOT`，明确标记迁移前历史不完整，不伪造无法重建的事件。
 
-### 3.7 system_log_import_records
+### 3.11 system_log_import_records
 
 系统日志批量导入表，用于通过 JDBC `PreparedStatement.addBatch()` 和 `executeBatch()` 批量导入审计日志归档或测试日志数据。MongoDB `system_logs` 仍是在线审计查询的主存储，本表用于满足关系库批处理导入和验收演示场景。
 
@@ -398,3 +473,8 @@ MongoDB 数据库名：`ticket_management_logs`。
 6. `src/main/resources/sql/mongodb_init.js`
 
 已初始化过的数据库可额外执行 `src/main/resources/sql/mysql_day07_optimization.sql`，补充 Day07 性能优化索引并查看关键查询的 `EXPLAIN` 结果。
+
+旧版本数据库在工单历史升级后执行 `src/main/resources/sql/mysql_service_management.sql`，用于增量创建 SLA 策略/截止时间、自动分配规则、通知、结构化偏好和评价唯一登记。脚本可重复执行，但执行前仍应备份。
+
+随后执行 `mysql_p1_features.sql`，新增 `knowledge_articles`、`reply_templates`、`handling_macros`、`data_lifecycle_runs`，并给 `orders` 增加 SLA 暂停与重开字段。MongoDB 新增 `action_logs_archive`、`system_logs_archive`，归档文档按 `archived_at` 建一年 TTL 索引。
+旧 MongoDB 使用 `mongodb_p1_lifecycle.js` 增量创建这些索引。

@@ -197,9 +197,10 @@ public class UserService {
             "用户已修改密码", "CHANGE_PASSWORD");
     }
 
-    public String resetPassword(User actor, Long userId) {
+    public String resetPassword(User actor, Long userId, String currentPassword) {
         actor = requireFreshActor(actor);
         requireAdministrator(actor);
+        verifyCurrentPassword(actor, currentPassword);
         if (userId == null) {
             throw new BusinessException("用户不存在");
         }
@@ -279,6 +280,7 @@ public class UserService {
     public void changeUserStatus(User actor, Long userId, int status, String reason, String currentPassword) {
         actor = requireFreshActor(actor);
         requireAdministrator(actor);
+        verifyCurrentPassword(actor, currentPassword);
         validateStatusChange(actor, userId, status);
         User target = userDAO.findByIdForSecurity(userId);
         if (target == null) {
@@ -303,6 +305,7 @@ public class UserService {
     public void changeUserRole(User actor, Long userId, String newRole, String reason, String currentPassword) {
         actor = requireFreshActor(actor);
         requireRoot(actor);
+        verifyCurrentPassword(actor, currentPassword);
         if (userId == null) {
             throw new BusinessException("用户不存在");
         }
@@ -520,6 +523,11 @@ public class UserService {
         }
         if (tooLong(profile.getNotes(), 1000)) {
             throw new BusinessException("备注长度不合法");
+        }
+        if (profile.getNotificationPreference() != null
+                && !java.util.Set.of("ALL", "STATUS", "RESULT", "NONE")
+                    .contains(profile.getNotificationPreference())) {
+            throw new BusinessException("通知偏好无效");
         }
     }
 

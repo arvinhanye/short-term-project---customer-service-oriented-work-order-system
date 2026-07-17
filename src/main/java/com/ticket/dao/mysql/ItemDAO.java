@@ -55,6 +55,15 @@ public class ItemDAO extends BaseDAO {
             });
     }
 
+    public int updateStatus(Connection connection, Long itemId, int status) throws Exception {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE items SET status = ?, updated_at = CURRENT_TIMESTAMP(3) WHERE item_id = ?")) {
+            statement.setInt(1, status);
+            statement.setLong(2, itemId);
+            return statement.executeUpdate();
+        }
+    }
+
     public PageResult<Item> pageByTitle(String keyword, int page, int pageSize) {
         String normalized = keyword == null ? "" : keyword.trim();
         if (normalized.length() >= 2) {

@@ -5,6 +5,7 @@ import com.ticket.ui.theme.AppTheme;
 import com.ticket.ui.theme.WindowIconUtil;
 import com.ticket.service.CrossDatabaseRepairService;
 import com.ticket.service.MongoLogRetryService;
+import com.ticket.service.ServiceManagementSchemaService;
 import com.ticket.service.TicketHistoryMigrationService;
 import com.ticket.util.MongoDBUtil;
 import com.ticket.util.MySQLDBUtil;
@@ -31,6 +32,16 @@ public class Main {
         } catch (Exception ex) {
             LOGGER.error("Failed to initialize database clients", ex);
             JOptionPane.showMessageDialog(null, "数据库初始化失败，请检查配置和数据库服务。", "启动失败", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        try {
+            new ServiceManagementSchemaService().verify();
+        } catch (Exception ex) {
+            LOGGER.error("Service management schema is not installed", ex);
+            JOptionPane.showMessageDialog(null,
+                "服务管理升级未完成，请依次执行 mysql_service_management.sql 和 mysql_p1_features.sql。原有数据不会被删除。",
+                "数据库升级未完成", JOptionPane.ERROR_MESSAGE);
             return;
         }
 

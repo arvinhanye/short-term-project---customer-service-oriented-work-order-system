@@ -1,11 +1,14 @@
 package com.ticket.service;
 
+import com.ticket.dao.mongo.AttachmentDAO;
 import com.ticket.dao.mongo.CommentDAO;
 import com.ticket.dao.mongo.DetailDAO;
+import com.ticket.dao.mysql.AssignmentRuleDAO;
 import com.ticket.dao.mysql.CategoryDAO;
 import com.ticket.dao.mysql.ItemDAO;
 import com.ticket.dao.mysql.OrderDAO;
 import com.ticket.dao.mysql.ProfileDAO;
+import com.ticket.dao.mysql.TicketRatingDAO;
 import com.ticket.dao.mysql.UserDAO;
 import com.ticket.dto.ItemDetailDTO;
 import com.ticket.dto.PageResult;
@@ -16,31 +19,45 @@ import com.ticket.model.Category;
 import com.ticket.model.Item;
 import com.ticket.model.ItemDetail;
 import com.ticket.model.Order;
+import com.ticket.model.StickerCatalog;
+import com.ticket.model.TicketAttachment;
 import com.ticket.model.TicketHistory;
 import com.ticket.model.User;
 import com.ticket.util.MySQLDBUtil;
 import com.ticket.util.WorkflowMetadataUtil;
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 import org.bson.Document;
 
 public class BusinessService {
     static final int REMINDER_COOLDOWN_MINUTES = 30;
+    public static final int MAX_ATTACHMENTS_PER_MESSAGE = 5;
+    public static final long MAX_ATTACHMENT_BYTES = 10L * 1024 * 1024;
+    public static final long MAX_TOTAL_ATTACHMENT_BYTES = 25L * 1024 * 1024;
+    public static final int MAX_MESSAGE_LENGTH = 4000;
     private final ItemDAO itemDAO = new ItemDAO();
     private final CategoryDAO categoryDAO = new CategoryDAO();
     private final OrderDAO orderDAO = new OrderDAO();
     private final UserDAO userDAO = new UserDAO();
     private final ProfileDAO profileDAO = new ProfileDAO();
+    private final AssignmentRuleDAO assignmentRuleDAO = new AssignmentRuleDAO();
+    private final TicketRatingDAO ticketRatingDAO = new TicketRatingDAO();
     private final DetailDAO detailDAO = new DetailDAO();
     private final CommentDAO commentDAO = new CommentDAO();
+    private final AttachmentDAO attachmentDAO = new AttachmentDAO();
     private final ActionLogService actionLogService = new ActionLogService();
     private final AuditLogService auditLogService = new AuditLogService();
     private final CrossDatabaseRepairService repairService = new CrossDatabaseRepairService();
     private final TicketHistoryService ticketHistoryService = new TicketHistoryService();
+    private final SlaService slaService = new SlaService();
+    private final NotificationService notificationService = new NotificationService();
 
     public long createTicket(User actor, String title, Long categoryId, BigDecimal amount, String description, String priority) {
         UserService.requireActiveUser(actor);
@@ -88,10 +105,20 @@ public class BusinessService {
         try (Connection connection = MySQLDBUtil.getWriteConnection()) {
             connection.setAutoCommit(false);
             try {
+                slaService.applyPolicy(connection, order, normalizedPriority, order.getCreatedAt());
+                AssignmentRuleDAO.Assignment assignment = assignmentRuleDAO.resolve(
+                    connection, categoryId, normalizedPriority);
+                if (assignment != null) {
+                    order.setAssignedAdminId(assignment.adminId());
+                    order.setWorkflowVersion(2);
+                }
                 itemId = itemDAO.insert(connection, item);
                 order.setItemId(itemId);
                 order.setOrderId(orderDAO.insert(connection, order));
                 ItemDetail detail = buildDetail(itemId, actor.getUserId(), description, normalizedPriority);
+                if (order.getAssignedAdminId() != null) {
+                    detail.getMetadata().setAssignedAdminId(String.valueOf(order.getAssignedAdminId()));
+                }
                 detailDAO.upsert(detail);
                 TicketHistory history = ticketHistoryService.event(
                     order, actor, "TICKET_CREATED", TicketHistoryService.PUBLIC, 1);
@@ -99,6 +126,20 @@ public class BusinessService {
                 history.setEventPayload(new Document("title", item.getTitle())
                     .append("priority", normalizedPriority).toJson());
                 ticketHistoryService.append(connection, history);
+                notificationService.notify(connection, actor.getUserId(), itemId, "TICKET_CREATED",
+                    "工单已创建", "工单 #" + itemId + " 已进入处理流程", "ticket-created:" + itemId);
+                if (assignment != null) {
+                    TicketHistory autoAssigned = ticketHistoryService.event(
+                        order, null, "AUTO_ASSIGNED", TicketHistoryService.PUBLIC, 2);
+                    autoAssigned.setToAdminId(assignment.adminId());
+                    autoAssigned.setReason("自动分配规则：" + assignment.ruleName());
+                    autoAssigned.setSourceType("ASSIGNMENT_RULE");
+                    autoAssigned.setSourceId(String.valueOf(assignment.ruleId()));
+                    ticketHistoryService.append(connection, autoAssigned);
+                    notificationService.notify(connection, assignment.adminId(), itemId, "AUTO_ASSIGNED",
+                        "收到自动分配工单", "工单 #" + itemId + " 已按规则“" + assignment.ruleName() + "”分配给你",
+                        "auto-assigned:" + itemId + ":" + assignment.adminId());
+                }
                 connection.commit();
                 actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "CREATE_ITEM");
                 auditLogService.write(String.valueOf(actor.getUserId()), "TICKET_OPERATION", "INFO",
@@ -153,25 +194,69 @@ public class BusinessService {
     }
 
     public void addCustomerReply(User actor, Long itemId, String content) {
-        addComment(actor, itemId, content, "CUSTOMER_REPLY", null, false);
+        addCustomerReply(actor, itemId, content, List.of(), null);
+    }
+
+    public void addCustomerReply(User actor, Long itemId, String content,
+                                 List<Path> files, String stickerCode) {
+        addComment(actor, itemId, content, "CUSTOMER_REPLY", null, false, files, stickerCode);
     }
 
     public void addAdminReply(User actor, Long itemId, String content) {
+        addAdminReply(actor, itemId, content, List.of(), null);
+    }
+
+    public void addAdminReply(User actor, Long itemId, String content,
+                              List<Path> files, String stickerCode) {
         UserService.requireTicketStaff(actor);
-        addComment(actor, itemId, content, "ADMIN_REPLY", null, true);
+        addComment(actor, itemId, content, "ADMIN_REPLY", null, true, files, stickerCode);
     }
 
     public void addInternalNote(User actor, Long itemId, String content) {
+        addInternalNote(actor, itemId, content, List.of(), null);
+    }
+
+    public void addInternalNote(User actor, Long itemId, String content,
+                                List<Path> files, String stickerCode) {
         UserService.requireTicketStaff(actor);
-        addComment(actor, itemId, content, "INTERNAL_NOTE", null, true);
+        addComment(actor, itemId, content, "INTERNAL_NOTE", null, true, files, stickerCode);
     }
 
     public void rateTicket(User actor, Long itemId, int rating, String content) {
+        UserService.requireActiveUser(actor);
         if (rating < 1 || rating > 5) {
             throw new BusinessException("评分必须在 1 到 5 之间");
         }
-        addComment(actor, itemId, content, "CUSTOMER_RATING", String.valueOf(rating), false);
+        if (commentDAO.hasRating(String.valueOf(itemId), String.valueOf(actor.getUserId()))) {
+            throw new BusinessException("该工单已经评价，不能重复提交");
+        }
+        addComment(actor, itemId, content, "CUSTOMER_RATING", String.valueOf(rating), false,
+            List.of(), null);
         actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "RATE");
+    }
+
+    public void downloadAttachment(User actor, Long itemId, String fileId, Path destination) {
+        UserService.requireActiveUser(actor);
+        if (itemId == null || fileId == null || fileId.isBlank() || destination == null) {
+            throw new BusinessException("附件参数不完整");
+        }
+        Order order = orderDAO.findByItemId(itemId);
+        if (order == null) {
+            throw new BusinessException("工单不存在");
+        }
+        boolean staff = UserService.isTicketStaff(actor);
+        if (!staff && !actor.getUserId().equals(order.getUserId())) {
+            throw new BusinessException("无权下载该工单附件");
+        }
+        if (!commentDAO.containsVisibleAttachment(String.valueOf(itemId), fileId, staff)) {
+            throw new BusinessException("附件不存在或当前账号无权查看");
+        }
+        try {
+            attachmentDAO.download(fileId, destination);
+            actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "DOWNLOAD_ATTACHMENT");
+        } catch (Exception ex) {
+            throw new BusinessException("下载附件失败", ex);
+        }
     }
 
     public void urgeTicket(User actor, Long itemId) {
@@ -195,6 +280,9 @@ public class BusinessService {
                     TicketHistoryService.PUBLIC, order.getWorkflowVersion() + 1);
                 history.setEventPayload(new Document("reminder_count", order.getReminderCount() + 1).toJson());
                 ticketHistoryService.append(connection, history);
+                notificationService.notify(connection, order.getAssignedAdminId(), itemId, "TICKET_REMINDER",
+                    "客户催促工单", "客户已催促工单 #" + itemId + "，请尽快处理",
+                    "reminder:" + itemId + ":" + (order.getReminderCount() + 1));
                 connection.commit();
                 order.setReminderCount(order.getReminderCount() + 1);
                 order.setLastRemindedAt(now);
@@ -216,6 +304,10 @@ public class BusinessService {
     }
 
     public void changeOrderStatus(User actor, Long orderId, int newStatus) {
+        changeOrderStatus(actor, orderId, newStatus, null);
+    }
+
+    public void changeOrderStatus(User actor, Long orderId, int newStatus, String reason) {
         actor = requireFreshTicketAdmin(actor);
         Order order;
         try (Connection connection = MySQLDBUtil.getWriteConnection()) {
@@ -230,18 +322,37 @@ public class BusinessService {
                     throw new BusinessException("当前存在待确认的接手邀请，请先处理后再流转状态");
                 }
                 validateStatusTransition(order.getStatus(), newStatus);
-                int updated = orderDAO.updateStatusIfCurrent(connection, order, actor.getUserId(), newStatus);
+                String normalizedReason = normalizeStatusReason(newStatus, reason);
+                int updated;
+                if (newStatus == 5 || newStatus == 6) {
+                    updated = orderDAO.pauseSla(connection, order, actor.getUserId(), newStatus,
+                        normalizedReason, LocalDateTime.now());
+                } else if ((Integer.valueOf(5).equals(order.getStatus())
+                        || Integer.valueOf(6).equals(order.getStatus())) && newStatus == 1) {
+                    updated = orderDAO.resumeSla(connection, order, actor.getUserId(), LocalDateTime.now());
+                } else {
+                    updated = orderDAO.updateStatusIfCurrent(connection, order, actor.getUserId(), newStatus);
+                }
                 if (updated != 1) {
                     throw new BusinessException("工单状态已被其他操作更新，请刷新后重试");
+                }
+                if (itemDAO.updateStatus(connection, order.getItemId(), newStatus) != 1) {
+                    throw new BusinessException("工单主记录不存在，状态更新已取消");
                 }
                 TicketHistory history = ticketHistoryService.event(order, actor, "STATUS_CHANGED",
                     TicketHistoryService.PUBLIC, order.getWorkflowVersion() + 1);
                 history.setFromStatus(order.getStatus());
                 history.setToStatus(newStatus);
+                history.setReason(normalizedReason);
                 ticketHistoryService.append(connection, history);
+                notificationService.notify(connection, order.getUserId(), order.getItemId(),
+                    newStatus == 2 || newStatus == 3 ? "STATUS_RESULT" : "STATUS_CHANGED",
+                    "工单状态已更新", "工单 #" + order.getItemId() + " 状态已更新为 " + statusText(newStatus),
+                    "status:" + order.getItemId() + ":" + (order.getWorkflowVersion() + 1));
+                Order updatedOrder = orderDAO.findByIdForUpdate(connection, orderId);
+                if (newStatus == 2 || newStatus == 3) notificationService.escalateResolvedBreach(connection, updatedOrder);
                 connection.commit();
-                order.setStatus(newStatus);
-                order.setWorkflowVersion(order.getWorkflowVersion() + 1);
+                order = updatedOrder;
             } catch (Exception ex) {
                 connection.rollback();
                 throw ex;
@@ -255,6 +366,99 @@ public class BusinessService {
         syncWorkflowMirror(actor, order, "STATUS_CHANGED");
         actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(order.getItemId()), "CHANGE_STATUS");
         auditLogService.write(String.valueOf(actor.getUserId()), "STATUS_CHANGE", "INFO", "工单状态已更新", "CHANGE_STATUS");
+    }
+
+    public void confirmTicketClose(User actor, Long itemId) {
+        actor = requireFreshTicketUser(actor);
+        Order order;
+        try (Connection connection = MySQLDBUtil.getWriteConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                order = orderDAO.findByItemIdForUpdate(connection, itemId);
+                if (order == null || !actor.getUserId().equals(order.getUserId())) {
+                    throw new BusinessException("只能关闭自己提交的工单");
+                }
+                if (!Integer.valueOf(2).equals(order.getStatus())) {
+                    throw new BusinessException("只有已完成工单可以确认关闭");
+                }
+                if (orderDAO.confirmClose(connection, order, actor.getUserId()) != 1) {
+                    throw new BusinessException("工单状态刚刚发生变化，请刷新后重试");
+                }
+                if (itemDAO.updateStatus(connection, itemId, 3) != 1) throw new BusinessException("工单主记录不存在");
+                TicketHistory history = ticketHistoryService.event(order, actor, "CUSTOMER_CONFIRMED_CLOSE",
+                    TicketHistoryService.PUBLIC, order.getWorkflowVersion() + 1);
+                history.setFromStatus(2);
+                history.setToStatus(3);
+                ticketHistoryService.append(connection, history);
+                notificationService.notify(connection, order.getAssignedAdminId(), itemId, "CUSTOMER_CLOSED",
+                    "客户已确认关闭", "客户已确认关闭工单 #" + itemId, "customer-close:" + itemId);
+                connection.commit();
+                order.setStatus(3);
+                order.setWorkflowVersion(order.getWorkflowVersion() + 1);
+            } catch (Exception ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (Exception ex) {
+            throw ex instanceof BusinessException businessException ? businessException
+                : new BusinessException("确认关闭工单失败", ex);
+        }
+        syncWorkflowMirror(actor, order, "CUSTOMER_CONFIRMED_CLOSE");
+        actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "CONFIRM_CLOSE");
+    }
+
+    public void reopenTicket(User actor, Long itemId, String reason) {
+        actor = requireFreshTicketUser(actor);
+        String normalizedReason = reason == null ? "" : reason.trim();
+        if (normalizedReason.isEmpty()) throw new BusinessException("请填写重新打开原因");
+        if (normalizedReason.length() > 500) throw new BusinessException("重新打开原因不能超过 500 个字符");
+        LocalDateTime now = LocalDateTime.now();
+        Order order;
+        try (Connection connection = MySQLDBUtil.getWriteConnection()) {
+            connection.setAutoCommit(false);
+            try {
+                order = orderDAO.findByItemIdForUpdate(connection, itemId);
+                if (order == null || !actor.getUserId().equals(order.getUserId())) {
+                    throw new BusinessException("只能重新打开自己提交的工单");
+                }
+                if (!Integer.valueOf(2).equals(order.getStatus())) {
+                    throw new BusinessException("只有尚未关闭的已完成工单可以重新打开");
+                }
+                if (order.getReopenDeadlineAt() == null || order.getReopenDeadlineAt().isBefore(now)) {
+                    throw new BusinessException("重新打开期限已过，请新建工单继续反馈");
+                }
+                SlaService.ReopenTargets targets = slaService.reopenTargets(connection, order, now);
+                if (orderDAO.reopen(connection, order, actor.getUserId(), targets.nextResponseDueAt(),
+                        targets.resolutionDueAt(), now) != 1) {
+                    throw new BusinessException("工单状态刚刚发生变化，请刷新后重试");
+                }
+                if (itemDAO.updateStatus(connection, itemId, 1) != 1) throw new BusinessException("工单主记录不存在");
+                TicketHistory history = ticketHistoryService.event(order, actor, "TICKET_REOPENED",
+                    TicketHistoryService.PUBLIC, order.getWorkflowVersion() + 1);
+                history.setFromStatus(2);
+                history.setToStatus(1);
+                history.setReason(normalizedReason);
+                ticketHistoryService.append(connection, history);
+                notificationService.notify(connection, order.getAssignedAdminId(), itemId, "TICKET_REOPENED",
+                    "客户重新打开工单", "工单 #" + itemId + " 已重新打开，原因：" + normalizedReason,
+                    "reopen:" + itemId + ":" + (order.getReopenCount() + 1));
+                Order updatedOrder = orderDAO.findByIdForUpdate(connection, order.getOrderId());
+                connection.commit();
+                order = updatedOrder;
+            } catch (Exception ex) {
+                connection.rollback();
+                throw ex;
+            } finally {
+                connection.setAutoCommit(true);
+            }
+        } catch (Exception ex) {
+            throw ex instanceof BusinessException businessException ? businessException
+                : new BusinessException("重新打开工单失败", ex);
+        }
+        syncWorkflowMirror(actor, order, "TICKET_REOPENED");
+        actionLogService.write(String.valueOf(actor.getUserId()), String.valueOf(itemId), "REOPEN_TICKET");
     }
 
     public void claimTicket(User actor, Long itemId) {
@@ -279,6 +483,9 @@ public class BusinessService {
                     TicketHistoryService.PUBLIC, order.getWorkflowVersion() + 1);
                 history.setToAdminId(actor.getUserId());
                 ticketHistoryService.append(connection, history);
+                notificationService.notify(connection, order.getUserId(), itemId, "TICKET_CLAIMED",
+                    "工单已被认领", "工单 #" + itemId + " 已有管理员开始处理",
+                    "claimed:" + itemId + ":" + actor.getUserId());
                 connection.commit();
                 order.setAssignedAdminId(actor.getUserId());
                 order.setWorkflowVersion(order.getWorkflowVersion() + 1);
@@ -327,6 +534,9 @@ public class BusinessService {
                 history.setSourceType("TRANSFER_REQUEST");
                 history.setSourceId(requestId);
                 ticketHistoryService.append(connection, history);
+                notificationService.notify(connection, targetAdminId, itemId, "TRANSFER_REQUESTED",
+                    "收到接手邀请", "工单 #" + itemId + " 邀请你接手，原因：" + normalizedReason,
+                    "transfer-request:" + requestId);
                 connection.commit();
                 order.setTransferRequestId(requestId);
                 order.setTransferRequestedBy(actor.getUserId());
@@ -382,6 +592,16 @@ public class BusinessService {
                 history.setSourceType("TRANSFER_REQUEST");
                 history.setSourceId(expectedRequestId);
                 ticketHistoryService.append(connection, history);
+                notificationService.notify(connection, order.getTransferRequestedBy(), itemId,
+                    accept ? "TRANSFER_ACCEPTED" : "TRANSFER_REJECTED",
+                    accept ? "接手邀请已接受" : "接手邀请已拒绝",
+                    "工单 #" + itemId + (accept ? " 已由目标管理员接手" : " 的接手邀请被拒绝"),
+                    "transfer-response:" + expectedRequestId);
+                if (accept) {
+                    notificationService.notify(connection, order.getUserId(), itemId, "ASSIGNEE_CHANGED",
+                        "工单负责人已更新", "工单 #" + itemId + " 已由新的管理员继续处理",
+                        "assignee-changed:" + expectedRequestId);
+                }
                 connection.commit();
                 if (accept) order.setAssignedAdminId(actor.getUserId());
                 clearTransfer(order);
@@ -430,6 +650,9 @@ public class BusinessService {
                 history.setSourceType("TRANSFER_REQUEST");
                 history.setSourceId(expectedRequestId);
                 ticketHistoryService.append(connection, history);
+                notificationService.notify(connection, targetAdminId, itemId, "TRANSFER_CANCELLED",
+                    "接手邀请已撤销", "工单 #" + itemId + " 的接手邀请已撤销",
+                    "transfer-cancel:" + expectedRequestId);
                 connection.commit();
                 clearTransfer(order);
                 order.setWorkflowVersion(order.getWorkflowVersion() + 1);
@@ -476,63 +699,121 @@ public class BusinessService {
 
     public static void validateStatusTransition(int oldStatus, int newStatus) {
         boolean valid = (oldStatus == 0 && (newStatus == 1 || newStatus == 4))
-            || (oldStatus == 1 && (newStatus == 2 || newStatus == 4))
+            || (oldStatus == 1 && (newStatus == 2 || newStatus == 4 || newStatus == 5 || newStatus == 6))
+            || ((oldStatus == 5 || oldStatus == 6) && newStatus == 1)
             || (oldStatus == 2 && newStatus == 3);
         if (!valid) {
             throw new BusinessException("非法状态流转");
         }
     }
 
-    private void addComment(User actor, Long itemId, String content, String tag, String rating, boolean adminOnlyAction) {
+    private void addComment(User actor, Long itemId, String content, String tag, String rating,
+                            boolean adminOnlyAction, List<Path> files, String stickerCode) {
         UserService.requireActiveUser(actor);
         if (adminOnlyAction) {
             actor = requireFreshTicketAdmin(actor);
         }
-        if (content == null || content.isBlank()) {
-            throw new BusinessException("内容不能为空");
-        }
+        List<Path> normalizedFiles = files == null ? List.of() : new ArrayList<>(files);
+        validateMessagePayload(content, normalizedFiles, stickerCode);
         String eventId = UUID.randomUUID().toString();
+        List<TicketAttachment> uploadedAttachments = new ArrayList<>();
+        boolean commentInserted = false;
         Comment comment = new Comment();
         comment.setEventId(eventId);
         comment.setUserId(String.valueOf(actor.getUserId()));
         comment.setItemId(String.valueOf(itemId));
-        comment.setContent(content.trim());
+        comment.setContent(content == null ? "" : content.trim());
         comment.setRating(rating == null ? "" : rating);
         comment.setTags(List.of(tag));
+        comment.setStickerCode(stickerCode == null ? "" : stickerCode);
         comment.setCreatedAt(Instant.now());
-        commentDAO.insert(comment);
-        try (Connection connection = MySQLDBUtil.getWriteConnection()) {
-            connection.setAutoCommit(false);
-            try {
-                Order order = orderDAO.findByItemIdForUpdate(connection, itemId);
-                validateCommentOperation(actor, order, tag, adminOnlyAction);
-                if (orderDAO.incrementWorkflowVersion(connection, order) != 1) {
-                    throw new BusinessException("工单刚刚发生变化，请刷新后重试");
+        try {
+            for (Path file : normalizedFiles) {
+                uploadedAttachments.add(attachmentDAO.upload(file, String.valueOf(itemId),
+                    String.valueOf(actor.getUserId())));
+            }
+            comment.setAttachments(uploadedAttachments);
+            commentDAO.insert(comment);
+            commentInserted = true;
+            try (Connection connection = MySQLDBUtil.getWriteConnection()) {
+                connection.setAutoCommit(false);
+                try {
+                    Order order = orderDAO.findByItemIdForUpdate(connection, itemId);
+                    validateCommentOperation(actor, order, tag, adminOnlyAction);
+                    if ("CUSTOMER_RATING".equals(tag)
+                            && !ticketRatingDAO.reserve(connection, itemId, actor.getUserId(), eventId,
+                                Integer.parseInt(rating))) {
+                        throw new BusinessException("该工单已经评价，不能重复提交");
+                    }
+                    LocalDateTime eventTime = LocalDateTime.now();
+                    int workflowUpdated;
+                    if ("ADMIN_REPLY".equals(tag)) {
+                        workflowUpdated = orderDAO.recordAdminResponse(connection, order, eventTime);
+                    } else if ("CUSTOMER_REPLY".equals(tag)) {
+                        workflowUpdated = orderDAO.recordCustomerReply(connection, order,
+                            slaService.nextResponseDueAt(connection, order, eventTime));
+                        if (Integer.valueOf(5).equals(order.getStatus())) itemDAO.updateStatus(connection, itemId, 1);
+                    } else {
+                        workflowUpdated = orderDAO.incrementWorkflowVersion(connection, order);
+                    }
+                    if (workflowUpdated != 1) {
+                        throw new BusinessException("工单刚刚发生变化，请刷新后重试");
+                    }
+                    TicketHistory history = ticketHistoryService.event(order, actor, historyEventType(tag),
+                        "INTERNAL_NOTE".equals(tag) ? TicketHistoryService.STAFF_ONLY : TicketHistoryService.PUBLIC,
+                        order.getWorkflowVersion() + 1);
+                    if ("CUSTOMER_REPLY".equals(tag) && Integer.valueOf(5).equals(order.getStatus())) {
+                        history.setFromStatus(5);
+                        history.setToStatus(1);
+                    }
+                    history.setSourceType("COMMENT");
+                    history.setSourceId(eventId);
+                    Document payload = new Document();
+                    if (rating != null) {
+                        payload.append("rating", rating);
+                    }
+                    if (!uploadedAttachments.isEmpty()) {
+                        payload.append("attachment_count", uploadedAttachments.size());
+                    }
+                    if (stickerCode != null && !stickerCode.isBlank()) {
+                        payload.append("sticker_code", stickerCode);
+                    }
+                    if ("CUSTOMER_REPLY".equals(tag) && Integer.valueOf(5).equals(order.getStatus())) {
+                        payload.append("auto_resumed", true);
+                    }
+                    if (!payload.isEmpty()) {
+                        history.setEventPayload(payload.toJson());
+                    }
+                    ticketHistoryService.append(connection, history);
+                    if ("CUSTOMER_REPLY".equals(tag)) {
+                        notificationService.notify(connection, order.getAssignedAdminId(), itemId, "CUSTOMER_REPLY",
+                            "客户追加回复", "工单 #" + itemId + " 收到客户新回复", "comment:" + eventId);
+                    } else if ("ADMIN_REPLY".equals(tag)) {
+                        notificationService.notify(connection, order.getUserId(), itemId, "ADMIN_REPLY",
+                            "管理员回复工单", "工单 #" + itemId + " 收到新的处理回复", "comment:" + eventId);
+                    } else if ("CUSTOMER_RATING".equals(tag)) {
+                        notificationService.notify(connection, order.getAssignedAdminId(), itemId, "CUSTOMER_RATING",
+                            "客户已评价", "工单 #" + itemId + " 收到 " + rating + " 星评价", "rating:" + eventId);
+                    }
+                    connection.commit();
+                } catch (Exception ex) {
+                    connection.rollback();
+                    throw ex;
+                } finally {
+                    connection.setAutoCommit(true);
                 }
-                TicketHistory history = ticketHistoryService.event(order, actor, historyEventType(tag),
-                    "INTERNAL_NOTE".equals(tag) ? TicketHistoryService.STAFF_ONLY : TicketHistoryService.PUBLIC,
-                    order.getWorkflowVersion() + 1);
-                history.setSourceType("COMMENT");
-                history.setSourceId(eventId);
-                if (rating != null) {
-                    history.setEventPayload(new Document("rating", rating).toJson());
-                }
-                ticketHistoryService.append(connection, history);
-                connection.commit();
-            } catch (Exception ex) {
-                connection.rollback();
-                throw ex;
-            } finally {
-                connection.setAutoCommit(true);
             }
         } catch (Exception ex) {
-            try {
-                commentDAO.deleteByEventId(eventId);
-            } catch (Exception compensationFailure) {
-                auditLogService.write(String.valueOf(actor.getUserId()), "CROSS_DB_FAIL", "ERROR",
-                    "评论历史写入失败且 MongoDB 补偿删除失败，工单=" + itemId,
-                    "COMMENT_HISTORY_COMPENSATION");
+            if (commentInserted) {
+                try {
+                    commentDAO.deleteByEventId(eventId);
+                } catch (Exception compensationFailure) {
+                    auditLogService.write(String.valueOf(actor.getUserId()), "CROSS_DB_FAIL", "ERROR",
+                        "评论历史写入失败且 MongoDB 补偿删除失败，工单=" + itemId,
+                        "COMMENT_HISTORY_COMPENSATION");
+                }
             }
+            cleanupUploadedAttachments(actor, itemId, uploadedAttachments);
             throw ex instanceof BusinessException businessException ? businessException
                 : new BusinessException("保存工单沟通历史失败", ex);
         }
@@ -540,6 +821,59 @@ public class BusinessService {
         if (adminOnlyAction || "CUSTOMER_RATING".equals(tag)) {
             auditLogService.write(String.valueOf(actor.getUserId()), "TICKET_OPERATION", "INFO",
                 "新增工单评论，类型：" + tag, "ADD_COMMENT");
+        }
+    }
+
+    static void validateMessagePayload(String content, List<Path> files, String stickerCode) {
+        List<Path> safeFiles = files == null ? List.of() : files;
+        boolean hasContent = content != null && !content.isBlank();
+        boolean hasSticker = stickerCode != null && !stickerCode.isBlank();
+        if (!hasContent && safeFiles.isEmpty() && !hasSticker) {
+            throw new BusinessException("请填写消息、添加附件或选择表情包");
+        }
+        if (content != null && content.trim().length() > MAX_MESSAGE_LENGTH) {
+            throw new BusinessException("消息内容不能超过 " + MAX_MESSAGE_LENGTH + " 个字符");
+        }
+        if (hasSticker && StickerCatalog.find(stickerCode) == null) {
+            throw new BusinessException("表情包无效，请重新选择");
+        }
+        if (safeFiles.size() > MAX_ATTACHMENTS_PER_MESSAGE) {
+            throw new BusinessException("单条消息最多上传 " + MAX_ATTACHMENTS_PER_MESSAGE + " 个附件");
+        }
+        long totalBytes = 0L;
+        for (Path file : safeFiles) {
+            if (file == null || !Files.isRegularFile(file) || !Files.isReadable(file)) {
+                throw new BusinessException("附件不存在或无法读取");
+            }
+            try {
+                long size = Files.size(file);
+                if (size <= 0) {
+                    throw new BusinessException("不能上传空文件：" + file.getFileName());
+                }
+                if (size > MAX_ATTACHMENT_BYTES) {
+                    throw new BusinessException("单个附件不能超过 10 MB：" + file.getFileName());
+                }
+                totalBytes += size;
+            } catch (BusinessException ex) {
+                throw ex;
+            } catch (Exception ex) {
+                throw new BusinessException("读取附件失败：" + file.getFileName(), ex);
+            }
+        }
+        if (totalBytes > MAX_TOTAL_ATTACHMENT_BYTES) {
+            throw new BusinessException("单条消息的附件合计不能超过 25 MB");
+        }
+    }
+
+    private void cleanupUploadedAttachments(User actor, Long itemId, List<TicketAttachment> attachments) {
+        for (TicketAttachment attachment : attachments) {
+            try {
+                attachmentDAO.delete(attachment.getFileId());
+            } catch (Exception compensationFailure) {
+                auditLogService.write(String.valueOf(actor.getUserId()), "CROSS_DB_FAIL", "ERROR",
+                    "附件补偿删除失败，工单=" + itemId + "，附件=" + attachment.getFileId(),
+                    "ATTACHMENT_COMPENSATION");
+            }
         }
     }
 
@@ -628,6 +962,27 @@ public class BusinessService {
 
     private String displayId(String value) {
         return hasText(value) ? value : "未分配";
+    }
+
+    private String statusText(int status) {
+        return switch (status) {
+            case 0 -> "待处理";
+            case 1 -> "处理中";
+            case 2 -> "已完成";
+            case 3 -> "已关闭";
+            case 4 -> "已取消";
+            case 5 -> "等待客户回复";
+            case 6 -> "暂挂";
+            default -> "未知状态";
+        };
+    }
+
+    private String normalizeStatusReason(int newStatus, String reason) {
+        String normalized = reason == null ? "" : reason.trim();
+        if (newStatus == 5 && normalized.isEmpty()) normalized = "等待客户补充信息";
+        if (newStatus == 6 && normalized.isEmpty()) throw new BusinessException("暂挂工单必须填写原因");
+        if (normalized.length() > 200) throw new BusinessException("状态流转原因不能超过 200 个字符");
+        return normalized.isEmpty() ? null : normalized;
     }
 
     private String stringValue(Long value) {

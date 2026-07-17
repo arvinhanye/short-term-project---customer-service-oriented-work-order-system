@@ -39,6 +39,8 @@ import javax.swing.text.AttributeSet;
 import javax.swing.text.BadLocationException;
 import javax.swing.text.DocumentFilter;
 import javax.swing.text.JTextComponent;
+import javax.swing.plaf.basic.BasicPasswordFieldUI;
+import javax.swing.plaf.basic.BasicTextFieldUI;
 
 public class LoginPanel extends JPanel {
     private static final String PASSWORD_TOGGLE_PROPERTY = "login-password-toggle";
@@ -261,7 +263,7 @@ public class LoginPanel extends JPanel {
 
     private JPanel buildLoginForm() {
         JPanel formPanel = AppTheme.surface(new GridBagLayout());
-        formPanel.setPreferredSize(new Dimension(440, 360));
+        formPanel.setPreferredSize(new Dimension(440, 350));
         formPanel.setBorder(authCardBorder());
         GridBagConstraints gbc = constraints();
 
@@ -373,8 +375,20 @@ public class LoginPanel extends JPanel {
     }
 
     private void styleAuthInput(JComponent component) {
+        if (component instanceof JPasswordField password) {
+            password.setUI(new BasicPasswordFieldUI());
+        } else if (component instanceof JTextField textField) {
+            textField.setUI(new BasicTextFieldUI());
+        }
         AppTheme.styleInput(component);
         component.setBackground(Color.WHITE);
+        component.setForeground(AppTheme.TEXT);
+        if (component instanceof JTextComponent text) {
+            text.setCaretColor(AppTheme.TEXT);
+            text.setSelectionColor(new Color(191, 219, 254));
+            text.setSelectedTextColor(AppTheme.TEXT);
+            text.setMargin(new Insets(0, 0, 0, 0));
+        }
         component.setBorder(BorderFactory.createCompoundBorder(
             BorderFactory.createLineBorder(new Color(160, 174, 194)),
             BorderFactory.createEmptyBorder(6, 9, 6, 9)));

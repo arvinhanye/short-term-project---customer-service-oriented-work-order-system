@@ -19,6 +19,7 @@ import com.ticket.model.ItemDetail;
 import com.ticket.model.Order;
 import com.ticket.model.User;
 import com.ticket.util.WorkflowMetadataUtil;
+import com.ticket.util.SlaDisplayUtil;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.Map;
@@ -28,7 +29,7 @@ import java.util.List;
 
 public class CrossDatabaseQueryService {
     /** 转派待接收方确认时使用的展示状态；不覆盖工单原有生命周期状态。 */
-    public static final int STATUS_PENDING_CONFIRMATION = 5;
+    public static final int STATUS_PENDING_CONFIRMATION = 99;
 
     public enum AssignmentScope {
         ALL,
@@ -237,6 +238,10 @@ public class CrossDatabaseQueryService {
             .sorted(Comparator.comparingInt(
                     (CrossTicketDTO ticket) -> matchesAssignment(
                         ticket, AssignmentScope.PENDING_TRANSFER_TO, assignedAdminId) ? 0 : 1)
+                .thenComparingInt(ticket -> ticket != null && ticket.getOrder() != null
+                    && "BREACHED".equals(ticket.getOrder().getSlaState()) ? 0 : 1)
+                .thenComparing(ticket -> ticket == null ? null : SlaDisplayUtil.nextDueAt(ticket.getOrder()),
+                    Comparator.nullsLast(Comparator.naturalOrder()))
                 .thenComparingInt(CrossDatabaseQueryService::priorityRank)
                 .thenComparing(CrossDatabaseQueryService::createdAt,
                     Comparator.nullsLast(Comparator.naturalOrder())))

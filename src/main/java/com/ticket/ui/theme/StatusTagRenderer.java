@@ -47,6 +47,8 @@ public class StatusTagRenderer extends DefaultTableCellRenderer {
             case "处理中" -> AppTheme.PRIMARY;
             case "待确认" -> new Color(124, 58, 237);
             case "已完成" -> AppTheme.SUCCESS;
+            case "等待客户回复" -> AppTheme.WARNING;
+            case "暂挂" -> AppTheme.MUTED;
             case "已关闭", "已取消" -> AppTheme.MUTED;
             default -> AppTheme.MUTED;
         };

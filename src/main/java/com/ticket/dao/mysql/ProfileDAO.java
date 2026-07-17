@@ -15,7 +15,8 @@ public class ProfileDAO extends BaseDAO {
 
     public long insert(Connection connection, Profile profile) throws Exception {
         try (PreparedStatement statement = connection.prepareStatement(
-            "INSERT INTO profiles (user_id, real_name, id_card, address, notes) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO profiles (user_id, real_name, id_card, address, notes, notification_preference) "
+                + "VALUES (?, ?, ?, ?, ?, ?)",
             Statement.RETURN_GENERATED_KEYS
         )) {
             statement.setLong(1, profile.getUserId());
@@ -23,6 +24,7 @@ public class ProfileDAO extends BaseDAO {
             statement.setString(3, profile.getIdCard());
             statement.setString(4, profile.getAddress());
             statement.setString(5, profile.getNotes());
+            statement.setString(6, preference(profile.getNotificationPreference()));
             statement.executeUpdate();
             try (var keys = statement.getGeneratedKeys()) {
                 if (keys.next()) {
@@ -39,13 +41,15 @@ public class ProfileDAO extends BaseDAO {
             executeTransactionCallback(connection -> insert(connection, profile));
             return;
         }
-        update("UPDATE profiles SET real_name = ?, id_card = ?, address = ?, notes = ? WHERE user_id = ?",
+        update("UPDATE profiles SET real_name = ?, id_card = ?, address = ?, notes = ?, "
+                + "notification_preference = ? WHERE user_id = ?",
             statement -> {
                 statement.setString(1, profile.getRealName());
                 statement.setString(2, profile.getIdCard());
                 statement.setString(3, profile.getAddress());
                 statement.setString(4, profile.getNotes());
-                statement.setLong(5, profile.getUserId());
+                statement.setString(5, preference(profile.getNotificationPreference()));
+                statement.setLong(6, profile.getUserId());
             });
     }
 
@@ -57,6 +61,11 @@ public class ProfileDAO extends BaseDAO {
         profile.setIdCard(resultSet.getString("id_card"));
         profile.setAddress(resultSet.getString("address"));
         profile.setNotes(resultSet.getString("notes"));
+        profile.setNotificationPreference(resultSet.getString("notification_preference"));
         return profile;
+    }
+
+    private String preference(String value) {
+        return value == null || value.isBlank() ? "ALL" : value;
     }
 }

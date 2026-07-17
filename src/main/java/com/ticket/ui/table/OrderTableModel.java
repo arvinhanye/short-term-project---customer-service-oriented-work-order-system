@@ -3,13 +3,14 @@ package com.ticket.ui.table;
 import com.ticket.dto.CrossTicketDTO;
 import com.ticket.model.ItemDetail;
 import com.ticket.util.TimeFormatUtil;
+import com.ticket.util.SlaDisplayUtil;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import javax.swing.table.AbstractTableModel;
 
 public class OrderTableModel extends AbstractTableModel {
-    private final String[] columns = {"工单编号", "标题", "分类", "优先级", "状态", "金额", "创建时间", "更新时间"};
+    private final String[] columns = {"工单编号", "标题", "分类", "优先级", "状态", "SLA", "金额", "创建时间", "更新时间"};
     private List<CrossTicketDTO> tickets = new ArrayList<>();
     private Map<Long, String> categoryDisplayNames = Map.of();
 
@@ -50,9 +51,10 @@ public class OrderTableModel extends AbstractTableModel {
                 : categoryDisplayNames.getOrDefault(ticket.getCategory().getCategoryId(), ticket.getCategory().getName());
             case 3 -> priorityText(ticket);
             case 4 -> ticket.getOrder() == null ? "" : statusText(ticket.getOrder().getStatus());
-            case 5 -> ticket.getOrder() == null ? "" : ticket.getOrder().getAmount();
-            case 6 -> ticket.getOrder() == null ? "—" : TimeFormatUtil.format(ticket.getOrder().getCreatedAt());
-            case 7 -> ticket.getItem() == null ? "—" : TimeFormatUtil.format(ticket.getItem().getUpdatedAt());
+            case 5 -> ticket.getOrder() == null ? "—" : SlaDisplayUtil.countdown(ticket.getOrder());
+            case 6 -> ticket.getOrder() == null ? "" : ticket.getOrder().getAmount();
+            case 7 -> ticket.getOrder() == null ? "—" : TimeFormatUtil.format(ticket.getOrder().getCreatedAt());
+            case 8 -> ticket.getItem() == null ? "—" : TimeFormatUtil.format(ticket.getItem().getUpdatedAt());
             default -> "";
         };
     }
@@ -85,6 +87,8 @@ public class OrderTableModel extends AbstractTableModel {
             case 2 -> "已完成";
             case 3 -> "已关闭";
             case 4 -> "已取消";
+            case 5 -> "等待客户回复";
+            case 6 -> "暂挂";
             default -> "未知(" + status + ")";
         };
     }
